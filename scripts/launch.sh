@@ -35,6 +35,18 @@ if [[ -f "$APP_DIR/spacemouse-enabled" ]]; then
   fi
 fi
 
+# Ensure no orphaned wineserver from a previous session remains
+if ! pgrep -fi "Fusion360\.exe" >/dev/null 2>&1; then
+  PV="${FUSION_PROTON_VERSION:-GE-Proton11-7-x86_64}"
+  if [[ -f "$APP_DIR/proton-version" ]]; then PV="$(cat "$APP_DIR/proton-version")"; fi
+  for pdir in "$HOME/.local/share/Steam/compatibilitytools.d/$PV" "$HOME/.local/share/Steam/steamapps/common/$PV"; do
+    if [[ -x "$pdir/files/bin/wineserver" ]]; then
+      WINEPREFIX="$APP_DIR/$PREFIX_DIR/pfx" "$pdir/files/bin/wineserver" -k 2>/dev/null || true
+      break
+    fi
+  done
+fi
+
 python3 "$APP_DIR/browser-listener.py" &
 LISTENER_PID=$!
 

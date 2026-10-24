@@ -51,7 +51,7 @@ fi
 export DXVK_CONFIG_FILE="$APP_DIR/dxvk.conf"
 export DXVK_LOG_PATH="$APP_DIR/logs"
 export DXVK_LOG_LEVEL=info
-export DXVK_STATE_CACHE_PATH="$APP_DIR/cache"
+export DXVK_STATE_CACHE=0
 
 # Load custom GPU overrides if present (e.g. DRI_PRIME, VK_DRIVER_FILES)
 if [[ -f "$APP_DIR/gpu.conf" ]]; then
@@ -62,7 +62,7 @@ fi
 export BROWSER="$APP_DIR/browser-request.py"
 export WINEDEBUG=-all
 
-mkdir -p "$STEAM_COMPAT_DATA_PATH" "$DXVK_LOG_PATH" "$DXVK_STATE_CACHE_PATH"
+mkdir -p "$STEAM_COMPAT_DATA_PATH" "$DXVK_LOG_PATH"
 
 # Locate Proton installation
 PROTON_DIR=""
