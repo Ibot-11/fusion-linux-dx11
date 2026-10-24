@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Autodesk Fusion Anmeldung
+Exec=@APP_DIR@/callback.py %u
+Type=Application
+NoDisplay=true
+MimeType=x-scheme-handler/adskidmgr;x-scheme-handler/adsk;

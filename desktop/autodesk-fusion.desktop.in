@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Autodesk Fusion
+Comment=Autodesk Fusion 360 CAD/CAM (DirectX 11 & Proton)
+Exec=@APP_DIR@/launch.sh %F
+Icon=autodesk-fusion
+Type=Application
+Categories=Graphics;Engineering;
+StartupNotify=false
+StartupWMClass=fusion360.exe
+MimeType=application/vnd.autodesk.fusion360;
