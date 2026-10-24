@@ -5,7 +5,7 @@
 # ==============================================================================
 set -euo pipefail
 
-VERSION="1.0.1"
+VERSION="1.0.2"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/autodesk-fusion"
 
@@ -156,7 +156,21 @@ apply_dx11_patches() {
       sed -i '/\[Control Panel\\\\Desktop\]/,/\[/{ /"DragWidth"/d; /"DragHeight"/d; }' "$user_reg"
       sed -i '/\[Control Panel\\\\Desktop\]/a "DragHeight"="10"\n"DragWidth"="10"' "$user_reg"
     fi
+    # Native d3dcompiler_47.dll Override sicherstellen
+    if grep -q '\[Software\\\\Wine\\\\DllOverrides\]' "$user_reg"; then
+      sed -i '/\[Software\\\\Wine\\\\DllOverrides\]/,/\[/{ /"d3dcompiler_47"/d; }' "$user_reg"
+      sed -i '/\[Software\\\\Wine\\\\DllOverrides\]/a "d3dcompiler_47"="native,builtin"' "$user_reg"
+    fi
     log_ok "Registry erfolgreich angepasst."
+  fi
+
+  # 9. Native Microsoft d3dcompiler_47.dll in system32 sicherstellen
+  local prod_compiler
+  prod_compiler="$(find "$target/$prefix_name/pfx/drive_c/users" -type f -name "d3dcompiler_47.dll" -size +2M 2>/dev/null | head -1 || true)"
+  local sys32_dir="$target/$prefix_name/pfx/drive_c/windows/system32"
+  if [[ -n "$prod_compiler" && -f "$prod_compiler" && -d "$sys32_dir" ]]; then
+    cp "$prod_compiler" "$sys32_dir/d3dcompiler_47.dll"
+    log_ok "Native Microsoft d3dcompiler_47.dll in system32 installiert."
   fi
 
   deploy_desktop_files "$target"

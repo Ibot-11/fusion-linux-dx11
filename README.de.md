@@ -32,8 +32,8 @@ Der Wechsel auf DirectX 11 scheiterte bisher meist an zwei kritischen Problemen:
 
 * **Eigener Vulkan-Präsentations-Layer (`libVkLayer_fusion_present_sync`):**
   Fängt `vkQueuePresentKHR` ab und synchronisiert die GPU via `vkQueueWaitIdle` – jedoch **ausschließlich auf dem großen 3D-Canvas** ($\ge 500\times 500$ px im Immediate-Modus). Dadurch wird das grüne Fang-Symbol sofort beim Bewegen aktualisiert, ohne Deadlocks bei schwebenden HUD-Fenstern zu verursachen.
-* **Treibereitige MSAA-Sperre (`dxvk.conf`):**
-  Durch `d3d11.disableMsaa = True` ignoriert DXVK Anfragen für Multisampling. Der Viewport bleibt dauerhaft glasklar sichtbar – selbst wenn Autodesk Cloud-Sync die Einstellungen überschreibt.
+* **Nativer Microsoft Direct3D Shader-Compiler (`d3dcompiler_47`):**
+  Ersetzt den unvollständigen Wine-Stub durch die offizielle Microsoft `d3dcompiler_47.dll` aus dem Autodesk-Programmverzeichnis. Garantiert fehlerfreie Kompilierung aller HLSL-Shadermodelle für 3D-Körper, Beleuchtung, Kantendarstellung und intakte Tiefenpuffer.
 * **Multi-Threading-Sicherheit:**
   `d3d11.enableContextLock = True` verhindert Race-Conditions zwischen dem 3D-Zeichenbereich und den Qt-Overlays.
 * **Präzise Klick-Erkennung:**

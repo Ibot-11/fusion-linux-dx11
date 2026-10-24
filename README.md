@@ -33,8 +33,8 @@ Attempting to run DirectX 11 via DXVK previously failed due to three critical sh
 
 * **Custom Native Vulkan Presentation Layer (`libVkLayer_fusion_present_sync`):**
   Intercepts `vkQueuePresentKHR` and calls `vkQueueWaitIdle` **specifically on the main 3D canvas** ($\ge 500\times 500$ px in `IMMEDIATE` mode). Secondary swapchains (floating dimension toolbars, HUDs, FIFO swapchains) are safely ignored. This instantly updates the snapping indicator without wiggling the mouse and without risking deadlocks.
-* **Driver-Level MSAA Lock (`dxvk.conf`):**
-  `d3d11.disableMsaa = True` tells DXVK to force sample count 1 at the driver level, ensuring the viewport never goes black even if Autodesk Cloud Sync changes options.
+* **Native Microsoft Direct3D Shader Compiler (`d3dcompiler_47`):**
+  Overrides Wine's incomplete built-in compiler with the official Microsoft `d3dcompiler_47.dll` shipped directly inside Autodesk Fusion. Ensures complex 3D HLSL shaders (PBR surfaces, depth testing, visible edges, and lighting) compile with full fidelity and intact depth-stencil buffers.
 * **Multi-Threading Safety:**
   `d3d11.enableContextLock = True` prevents race conditions between the main 3D drawing thread and floating Qt child windows.
 * **Reliable Left-Click Registration:**

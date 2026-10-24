@@ -35,7 +35,7 @@ export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_DIR"
 export PROTON_USE_WINED3D=0
 export PROTON_USE_XALIA=0
 export NO_AT_BRIDGE=1
-export WINEDLLOVERRIDES="bcp47langs=;icuuc,icuin,icudt=n,b"
+export WINEDLLOVERRIDES="bcp47langs=;icuuc,icuin,icudt,d3dcompiler_47=n,b"
 
 if [[ -f "$APP_DIR/spacemouse-enabled" ]]; then
   export WINEDLLOVERRIDES="$WINEDLLOVERRIDES;siappdll=n,b"
@@ -51,7 +51,6 @@ fi
 export DXVK_CONFIG_FILE="$APP_DIR/dxvk.conf"
 export DXVK_LOG_PATH="$APP_DIR/logs"
 export DXVK_LOG_LEVEL=info
-export DXVK_STATE_CACHE=0
 
 # Load custom GPU overrides if present (e.g. DRI_PRIME, VK_DRIVER_FILES)
 if [[ -f "$APP_DIR/gpu.conf" ]]; then
