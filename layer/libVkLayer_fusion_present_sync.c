@@ -16,6 +16,8 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#define FUSION_PRESENT_SYNC_VERSION "1.0.0"
+
 typedef int VkResult;
 typedef void* VkQueue;
 typedef void* VkDevice;

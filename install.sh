@@ -5,6 +5,7 @@
 # ==============================================================================
 set -euo pipefail
 
+VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/autodesk-fusion"
 
@@ -232,7 +233,11 @@ clean_install() {
   log_ok "Alles eingerichtet! Du kannst Fusion nun über das Startmenü oder '~/.local/bin/autodesk-fusion' starten."
 }
 
-# --- Hauptmenü ---
+if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then
+  echo "fusion-linux-dx11 installer version $VERSION"
+  exit 0
+fi
+
 check_prerequisites
 
 if [[ "${1:-}" == "--patch" ]]; then
@@ -245,7 +250,7 @@ fi
 
 echo ""
 echo "===================================================================="
-echo "    Autodesk Fusion 360 - Linux DirectX 11 / Proton Installer"
+echo "  Autodesk Fusion 360 - Linux DX11 / Proton Installer (v$VERSION)"
 echo "===================================================================="
 echo "1) Vorhandene Fusion-Installation auf DX11 & Snapping-Fix patchen (Empfohlen)"
 echo "2) Frische Neuinstallation (Download + Proton Prefix Setup)"
