@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/autodesk-fusion"
+APP_DIR="${FUSION_APP_DIR:-$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")}"
 
 STEAM_SEARCH_DIRS=(
   "$HOME/.local/share/Steam"

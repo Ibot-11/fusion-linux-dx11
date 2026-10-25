@@ -14,7 +14,7 @@ def stop(*args):
 signal.signal(signal.SIGTERM, stop)
 browser_env = os.environ.copy()
 browser_env.pop('GDK_BACKEND', None)
-app = pathlib.Path(os.environ.get('XDG_DATA_HOME', str(pathlib.Path.home()/'.local/share'))) / 'autodesk-fusion'
+app = pathlib.Path(os.environ.get('FUSION_APP_DIR', str(pathlib.Path(__file__).resolve().parent)))
 logfile = app/'logs/browser.log'
 while running:
     for request in queue.glob('*.request'):

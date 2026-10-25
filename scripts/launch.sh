@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/autodesk-fusion"
+APP_DIR="${FUSION_APP_DIR:-$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")}"
 PREFIX_DIR="${FUSION_PREFIX_DIR:-compatdata-exp-dx11}"
 
 if [[ -f "$APP_DIR/prefix-dir" ]]; then PREFIX_DIR="$(cat "$APP_DIR/prefix-dir")"; fi
 production="$APP_DIR/$PREFIX_DIR/pfx/drive_c"
 
-FUSION="$(find "$production" -type f -name Fusion360.exe -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
+FUSION="$(find "$production" -type f -name Fusion360.exe -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || true)"
 if [[ -z "$FUSION" ]]; then
   if command -v kdialog >/dev/null 2>&1; then
     kdialog --error 'Autodesk Fusion 360 ist in diesem Prefix noch nicht installiert.'
@@ -26,12 +26,21 @@ if [[ -f "$APP_DIR/logs/fusion.log" && $(stat -c%s "$APP_DIR/logs/fusion.log" 2>
   mv "$APP_DIR/logs/fusion.log" "$APP_DIR/logs/fusion.log.old"
 fi
 
-SPACEMOUSE_PID=''
 if [[ -f "$APP_DIR/spacemouse-enabled" ]]; then
-  if python3 "$APP_DIR/spacemouse/install-sdk.py" "$FUSION" >> "$APP_DIR/logs/spacemouse-start.log" 2>&1; then
-    python3 "$APP_DIR/spacemouse/start.py" >> "$APP_DIR/logs/spacemouse-start.log" 2>&1 &
-    SPACEMOUSE_PID=$!
-    python3 "$APP_DIR/spacemouse/start.py" --wait || true
+  if [[ -f "$APP_DIR/spacemouse/camera_gain.py" ]]; then
+    if ! python3 "$APP_DIR/spacemouse/camera_gain.py" --apply >> "$APP_DIR/logs/spacemouse-start.log" 2>&1; then
+      kdialog --passivepopup 'Die SpaceMouse-Kamerageschwindigkeit konnte nicht übernommen werden. Details im Fusion-Protokoll.' 10 || true
+    elif fusion_camera_scale="$(python3 "$APP_DIR/spacemouse/camera_gain.py" --runtime-scale)"; then
+      export FUSION_SPACEMOUSE_CAMERA_SCALE="$fusion_camera_scale"
+    else
+      kdialog --passivepopup 'Der zusätzliche SpaceMouse-Kamerafaktor konnte nicht gelesen werden.' 10 || true
+    fi
+  fi
+  if ! python3 "$APP_DIR/spacemouse/install-sdk.py" "$FUSION" >> "$APP_DIR/logs/spacemouse-start.log" 2>&1 ||
+     ! systemctl --user start fusion-spacemouse.service >> "$APP_DIR/logs/spacemouse-start.log" 2>&1; then
+    if command -v kdialog >/dev/null 2>&1; then
+      kdialog --passivepopup 'SpaceMouse konnte nicht starten. Details im Fusion-SpaceMouse-Journal.' 10 || true
+    fi
   fi
 fi
 
@@ -64,7 +73,7 @@ else
   PANEL_PID=''
 fi
 
-trap 'kill "$LISTENER_PID" ${FIX_PID:+"$FIX_PID"} ${PANEL_PID:+"$PANEL_PID"} ${SPACEMOUSE_PID:+"$SPACEMOUSE_PID"} 2>/dev/null || true' EXIT
+trap 'kill "$LISTENER_PID" ${FIX_PID:+"$FIX_PID"} ${PANEL_PID:+"$PANEL_PID"} 2>/dev/null || true' EXIT
 
 cd "$(dirname "$FUSION")"
 ARGS=()

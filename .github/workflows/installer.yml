@@ -1,0 +1,29 @@
+name: Installer and SpaceMouse
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libvulkan-dev qt6-base-dev qt6-base-dev-tools libx11-dev
+      - name: Build runtime
+        run: |
+          make -C layer
+          bash spacemouse/build.sh
+      - name: Installer and update tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Calibration and process tests
+        run: |
+          python3 -m unittest discover -s spacemouse/tests -p test_camera_gain.py -v
+          python3 -m unittest discover -s spacemouse/tests -p test_processes.py -v
+      - name: Native relay integration tests
+        env:
+          TEST_RELAY: .build/spacemouse/runtime/bin/spconvd
+        run: python3 -m unittest discover -s spacemouse/tests -p test_relay.py -v
+      - name: Shell syntax
+        run: bash -n install.sh scripts/*.sh spacemouse/*.sh
