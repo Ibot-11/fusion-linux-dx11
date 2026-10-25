@@ -2,7 +2,7 @@
 set -euo pipefail
 unset QT_QPA_PLATFORM QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH
 
-APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/autodesk-fusion"
+APP_DIR="${FUSION_APP_DIR:-$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")}"
 PREFIX_DIR="${FUSION_PREFIX_DIR:-compatdata-exp-dx11}"
 PROTON_VERSION="${FUSION_PROTON_VERSION:-Proton - Experimental}"
 

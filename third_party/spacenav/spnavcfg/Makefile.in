@@ -1,0 +1,75 @@
+csrc := $(wildcard src/*.c)
+ccsrc := $(wildcard src/*.cc)
+mochdr = src/ui.h
+mocsrc = $(mochdr:.h=.moc.cc)
+obj = $(sort $(csrc:.c=.o) $(ccsrc:.cc=.o) $(mocsrc:.cc=.o)) res.cc
+dep = $(csrc:.c=.d) $(ccsrc:.cc=.d)
+bin = spnavcfg
+
+CC ?= gcc
+CXX ?= g++
+UIC ?= $(qtuic)
+MOC ?= $(qtmoc)
+RCC ?= $(qtrcc)
+
+warn = -pedantic -Wall
+incpath = -I. -I$(PREFIX)/include
+libpath = -L$(PREFIX)/lib
+
+CFLAGS = $(warn) $(dbg) $(opt) $(incpath) -fPIC $(add_cflags) -MMD
+CXXFLAGS = $(warn) $(dbg) $(opt) $(incpath) -fPIC $(cflags_qt) \
+		 $(add_cflags) -MMD
+LDFLAGS = $(libpath) $(libs_qt) -lspnav -lX11 $(add_ldflags)
+
+$(bin): $(obj)
+	$(CXX) -o $@ $(obj) $(LDFLAGS)
+
+-include $(dep)
+
+src/main.o: src/main.cc
+src/ui.o: src/ui.cc ui_mainwin.h ui_bnmaprow.h ui_about.h
+
+ui_mainwin.h: ui/spnavcfg.ui
+	$(UIC) -o $@ $<
+
+ui_bnmaprow.h: ui/bnmaprow.ui
+	$(UIC) -o $@ $<
+
+ui_about.h: ui/about.ui
+	$(UIC) -o $@ $<
+
+%.moc.cc: %.h
+	$(MOC) -o $@ $(incpath) $<
+
+res.cc: ui/spnavcfg.qrc icons/devices.png
+	$(RCC) -o $@ $<
+
+.PHONY: clean
+clean:
+	rm -f $(obj) $(bin) $(mocsrc) ui_mainwin.h ui_bnmaprow.h ui_about.h res.cc
+
+.PHONY: cleandep
+cleandep:
+	rm -f $(dep)
+
+.PHONY: install
+install:
+	mkdir -p $(DESTDIR)$(PREFIX)/bin
+	cp $(bin) $(DESTDIR)$(PREFIX)/bin/$(bin)
+	for i in 48 128 256; do \
+		destdir=$(DESTDIR)$(PREFIX)/share/icons/hicolor/$${i}x$${i}/apps; \
+		mkdir -p $$destdir; \
+		cp icons/spnavcfg-$${i}x$${i}.png $$destdir/spnavcfg.png; \
+	done
+	mkdir -p $(DESTDIR)$(PREFIX)/share/applications
+	cp -a icons/spnavcfg.desktop $(DESTDIR)$(PREFIX)/share/applications/
+
+
+.PHONY: uninstall
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(bin)
+	for i in 48 128 256; do \
+		destdir=$(DESTDIR)$(PREFIX)/share/icons/hicolor/$${i}x$${i}/apps; \
+		rm -f $${destdir}/spnavcfg.png; \
+	done
+	rm -f $(DESTDIR)$(PREFIX)/share/applications/spnavcfg.desktop

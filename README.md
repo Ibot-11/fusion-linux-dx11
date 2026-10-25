@@ -56,7 +56,8 @@ Attempting to run DirectX 11 via DXVK previously failed due to three critical sh
    * **NVIDIA:** Proprietary Nvidia drivers (`nvidia-utils`)
    * **Intel:** Mesa ANV (`vulkan-intel`)
 3. **Steam:** Installed with **Proton - Experimental** (In Steam: *Library* $\rightarrow$ *Tools* $\rightarrow$ install *Proton Experimental*).
-4. **Build Tools:** `gcc`, `make`, `python3`
+4. **Build Tools:** `gcc`, `make`, `python3`, Vulkan development headers; `git` for updates.
+5. **Optional SpaceMouse:** `g++`, `pkg-config`, Qt 6 Widgets development tools, X11 development headers, `kdialog`, and a systemd user session. On Debian/Ubuntu: `build-essential pkg-config libvulkan-dev qt6-base-dev qt6-base-dev-tools libx11-dev kdialog`; on Arch/CachyOS: `base-devel vulkan-headers qt6-base libx11 kdialog`.
 
 ---
 
@@ -70,7 +71,7 @@ cd fusion-linux-dx11
 ./install.sh
 ```
 
-The interactive installer provides two main modes:
+The interactive installer provides installation, update and build modes:
 
 ### Option 1: Patch an Existing Installation (Recommended)
 If you already have Fusion 360 installed via another script (such as cryinkfly's installer or Fusion180):
@@ -82,6 +83,73 @@ If you already have Fusion 360 installed via another script (such as cryinkfly's
 * Downloads the official Autodesk Fusion installer.
 * Initializes a fresh prefix with Proton - Experimental.
 * Applies all DX11 performance optimizations and creates application menu entries.
+
+## Updating an existing installation
+
+Close Fusion, then choose **Update** in the installer or run:
+
+```bash
+./install.sh --update
+# Custom installation directory:
+./install.sh --update "/path/to/autodesk-fusion"
+```
+
+After the first setup with this version, **Fusion aktualisieren** is also available
+in the application menu, or run `autodesk-fusion-update`.
+
+The updater fetches the current checkout's tracked Git branch, accepts only a
+fast-forward, and runs the **newly fetched installer**. It refuses local changes,
+untracked files and divergent history; it never resets or stashes your work.
+If the original checkout was removed, the installed updater can clone its recorded
+repository and branch again. `./install.sh --apply-update` applies the current
+checkout without fetching, useful for offline installs and development.
+
+Updates preserve the selected Wine prefix, Proton version, models, `gpu.conf`,
+DXVK settings and SpaceMouse settings, including whether SpaceMouse is disabled.
+New DXVK defaults are saved as `dxvk.conf.dist` for comparison. Replaced Linux
+runtime files are backed up under `backups/updates/<timestamp>/` in the installation
+directory. These backups contain helper files and settings, **not a backup of
+the complete Wine prefix or your documents**. Autodesk Fusion itself continues to
+use Autodesk's own updater; this command updates the Linux integration from this repo.
+
+## SpaceMouse Wireless
+
+Choose SpaceMouse during setup, or add it to an existing installation:
+
+```bash
+./install.sh --apply-update --with-spacemouse
+```
+
+The installer builds the private FreeSpacenav driver, native relay and Qt settings
+application from the pinned sources in this repo. A matching x86_64 SDK DLL is
+included with its complete source; MinGW can rebuild it when installed. There are
+no additional source downloads during this build and no root driver is installed.
+The tested device is **SpaceMouse Wireless through the USB Universal Receiver**.
+
+Open **Fusion SpaceMouse** from the application menu for camera speed, axes and
+buttons. The driver starts on demand through `fusion-spacemouse.service`; device
+access uses your desktop session's input permissions. If it cannot access the
+receiver, inspect `journalctl --user -u fusion-spacemouse.service` and your distro's
+input-device permissions. No world-writable device rule is installed.
+
+The bridge selects Fusion's **Legacy / Ältere** SpaceMouse driver before launch.
+The portable camera default is 25%; existing settings are kept, including the
+tested 20% setting. Speeds between the native steps use a floating-point extension
+verified for Fusion **2705.1.30**. Other builds retain native 25/50/75/100% steps;
+see [SpaceMouse details](spacemouse/README.md) for compatibility and diagnostics.
+Axis input integers are forwarded without sensitivity reduction or extra batching.
+Modern 3DxWare radial menus and full application profiles are not implemented.
+
+To disable and restore the original SDK, close Fusion and run:
+
+```bash
+python3 ~/.local/share/autodesk-fusion/spacemouse/control.py disable
+# Re-enable:
+python3 ~/.local/share/autodesk-fusion/spacemouse/control.py enable
+```
+
+`--without-spacemouse` skips that component during setup/update. An already
+disabled component remains disabled during normal updates.
 
 ---
 
@@ -138,4 +206,7 @@ fusion-linux-dx11/
 
 ## 📄 License
 
-MIT License – Free to use, modify, and distribute.
+The original Linux launcher and presentation layer use the MIT license.
+The SpaceMouse bridge, spacenavd and spnavcfg use GPL-3.0-or-later; libspnav uses
+BSD-3-Clause and MinHook retains its own BSD-style license. Corresponding source
+and license notices are included under `spacemouse/` and `third_party/spacenav/`.

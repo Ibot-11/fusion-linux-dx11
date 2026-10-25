@@ -2,7 +2,7 @@
 import os, pathlib, subprocess, sys, urllib.parse
 if len(sys.argv) != 2 or urllib.parse.urlsplit(sys.argv[1]).scheme not in ('adsk', 'adskidmgr'):
     sys.exit(1)
-app = pathlib.Path(os.environ.get('XDG_DATA_HOME', str(pathlib.Path.home()/'.local/share'))) / 'autodesk-fusion'
+app = pathlib.Path(os.environ.get('FUSION_APP_DIR', str(pathlib.Path(__file__).resolve().parent)))
 prefix_dir = (app/'prefix-dir').read_text().strip() if (app/'prefix-dir').exists() else 'compatdata'
 if urllib.parse.urlsplit(sys.argv[1]).scheme == 'adsk':
     sys.exit(subprocess.call([str(app/'launch.sh'), sys.argv[1]]))
