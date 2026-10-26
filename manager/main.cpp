@@ -664,7 +664,6 @@ class Manager : public QMainWindow {
         axes->addStretch();
         auto *deadzoneRow = new QHBoxLayout;
         deadzone->setObjectName("deadzone");
-        deadzone->setButtonSymbols(QAbstractSpinBox::NoButtons);
         deadzone->setRange(0, 100);
         deadzone->setSuffix(" counts");
         deadzone->setFixedWidth(108);
@@ -710,7 +709,6 @@ class Manager : public QMainWindow {
         bindings->addWidget(separator);
         auto *cameraRow = new QHBoxLayout;
         camera->setObjectName("camera");
-        camera->setButtonSymbols(QAbstractSpinBox::NoButtons);
         camera->setRange(1, 100);
         camera->setSuffix(" %");
         camera->setFixedWidth(88);
