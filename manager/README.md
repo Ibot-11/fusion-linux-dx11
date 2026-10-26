@@ -70,6 +70,21 @@ The explicitly identified evdev fallback is limited: a steady deflection stops
 after 250 ms without an ABS change. Set up direct HID access for held movement.
 Unsupported devices are not treated as a verified motion interface.
 
+## Button assignments
+
+Choose **Record shortcut…** under Left or Right, press the desired key or
+combination, then release it. Choose **Use shortcut** and **Save input**.
+Single keys, F1–F24, navigation keys, number-pad keys and Ctrl/Shift/Alt/Super/AltGr
+combinations are supported. Modifiers can also be assigned as held buttons.
+**Type shortcut** accepts a shortcut such as `Ctrl+Shift+S` when the desktop
+reserves it and prevents recording. Assignments contain one chord, not macros.
+
+Keyboard actions apply while Fusion has focus. Shared modifiers remain held
+until both assigned buttons release them. Focus loss, disconnect and shutdown
+release held keys. Printable characters follow Fusion's Windows keyboard layout;
+characters unavailable in that layout are rejected. Existing button assignments
+survive updates.
+
 ## Status and diagnostics
 
 Fusion's version comes from the selected executable's `fusion_version.txt` or
@@ -87,6 +102,7 @@ below 25% retain the existing signature check for supported Fusion builds.
 ```sh
 make -C layer
 make -C manager
+make -C manager check
 bash spacemouse/build.sh
 python3 -m unittest discover -s tests -v
 python3 -m unittest discover -s spacemouse/tests -p 'test_*.py' -v

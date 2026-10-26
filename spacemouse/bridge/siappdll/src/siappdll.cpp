@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <deque>
 #include "log.h"
 #include "camera_scale.h"
+#include "key_chords.h"
 
 #include "MinHook.h"
 
@@ -160,9 +161,67 @@ void collectMotionEvent(motion_t m)
     ReleaseMutex(ghMutex);
 }
 
+static bool fusion_has_focus()
+{
+    DWORD pid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+    return pid == GetCurrentProcessId() && IsWindow(tgt_wndw);
+}
+
+static bool resolve_chord(const int* packet, fusion_keys::Chord& chord)
+{
+    int mask = packet[5];
+    if (packet[3] == 0) {
+        chord.main = {(unsigned short)packet[4], packet[6] != 0};
+    } else {
+        HWND foreground = GetForegroundWindow();
+        DWORD thread = GetWindowThreadProcessId(foreground, NULL);
+        HKL layout = GetKeyboardLayout(thread);
+        WCHAR character = (WCHAR)packet[4];
+        // Qt reports logical alphabetic keys in uppercase. Case is controlled
+        // by the explicit modifier, not an accidental implicit Shift.
+        CharLowerBuffW(&character, 1);
+        SHORT translated = VkKeyScanExW(character, layout);
+        if (translated == -1 || ((translated >> 8) & ~7)) {
+            LOG(ERROR) << "Shortcut character is unavailable in the focused keyboard layout";
+            return false;
+        }
+        const unsigned int shift = ((unsigned short)translated) >> 8;
+        if (shift & 1) mask |= 2;
+        if ((shift & 6) == 6) mask |= 16; // Layout's AltGr is left Ctrl + right Alt.
+        else {
+            if (shift & 2) mask |= 1;
+            if ((shift & 4) && !(mask & 16)) mask |= 4;
+        }
+        chord.main = {(unsigned short)(translated & 0xff), false};
+        if (!chord.main.vk || chord.main.vk == 0xff) return false;
+    }
+    auto add = [&](unsigned short vk, bool extended = false) {
+        for (auto key : chord.modifiers) if (key.vk == vk) return;
+        chord.modifiers.push_back({vk, extended});
+    };
+    if (mask & (1 | 16)) add(VK_LCONTROL);
+    if (mask & 2) add(VK_LSHIFT);
+    if (mask & 4) add(VK_LMENU);
+    if (mask & 8) add(VK_LWIN, true);
+    if (mask & 16) add(VK_RMENU, true);
+    return true;
+}
+
 DWORD WINAPI RcvThreadFunction(LPVOID)
 {
+    fusion_keys::State keys([](fusion_keys::Key key, bool down) {
+        // Check each down, including modifiers, if focus changed mid-chord.
+        if (down && !fusion_has_focus()) return false;
+        INPUT input = {};
+        input.type = INPUT_KEYBOARD;
+        input.ki.wVk = key.vk;
+        input.ki.dwFlags = (down ? 0 : KEYEVENTF_KEYUP) |
+                           (key.extended ? KEYEVENTF_EXTENDEDKEY : 0);
+        return SendInput(1, &input, sizeof(input)) == 1;
+    });
     while (WaitForSingleObject(stop_event, 0) == WAIT_TIMEOUT) {
+        keys.retry_releases();
         SOCKET fd = sock_connect(FUSION_BRIDGE_HOST, FUSION_BRIDGE_PORT);
         if (fd == INVALID_SOCKET) {
             WaitForSingleObject(stop_event, 500);
@@ -170,24 +229,11 @@ DWORD WINAPI RcvThreadFunction(LPVOID)
         }
         LOG(INFO) << "Fusion input bridge connected";
         unsigned long button_state = 0;
-        bool keys[256] = {};
-        auto release_keys = [&]() {
-            for (unsigned int vk = 0; vk < 256; ++vk) {
-                if (!keys[vk]) continue;
-                INPUT input = {};
-                input.type = INPUT_KEYBOARD;
-                input.ki.wVk = (WORD)vk;
-                input.ki.dwFlags = KEYEVENTF_KEYUP | (vk == VK_HOME ? KEYEVENTF_EXTENDEDKEY : 0);
-                SendInput(1, &input, sizeof(input));
-                keys[vk] = false;
-            }
-        };
         char packet[8 * sizeof(int)];
         size_t packet_used = 0;
         while (WaitForSingleObject(stop_event, 0) == WAIT_TIMEOUT) {
-            DWORD foreground_pid = 0;
-            GetWindowThreadProcessId(GetForegroundWindow(), &foreground_pid);
-            if (foreground_pid != GetCurrentProcessId()) release_keys();
+            if (!fusion_has_focus()) keys.clear();
+            keys.retry_releases();
             fd_set ready;
             FD_ZERO(&ready);
             FD_SET(fd, &ready);
@@ -224,22 +270,26 @@ DWORD WINAPI RcvThreadFunction(LPVOID)
             } else if (buf[0] == 3 && (buf[1] == VK_ESCAPE || buf[1] == 'I' ||
                        buf[1] == 'F' || buf[1] == VK_HOME ||
                        (buf[1] >= '1' && buf[1] <= '3')) &&
-                       (buf[2] == 0 || buf[2] == 1) && buf[3] == 0) {
-                // Protocol 3: whitelisted virtual key, down/up, reserved modifiers.
-                // No global uinput device: key-down only reaches focused Fusion.
-                unsigned int vk = (unsigned int)buf[1];
+                       (buf[2] == 0 || buf[2] == 1) && buf[3] == 0 &&
+                       buf[4] == 0 && buf[5] == 0 && buf[6] == 0 && buf[7] == 0) {
+                // Backward-compatible legacy VK protocol. New producers use
+                // physical button IDs, so duplicate/overlapping chords share
+                // keys without releasing another button's hold.
                 bool down = buf[2] != 0;
-                GetWindowThreadProcessId(GetForegroundWindow(), &foreground_pid);
-                if (down && (foreground_pid != GetCurrentProcessId() || !IsWindow(tgt_wndw))) continue;
-                if (keys[vk] == down) continue;
-                INPUT input = {};
-                input.type = INPUT_KEYBOARD;
-                input.ki.wVk = (WORD)vk;
-                input.ki.dwFlags = (down ? 0 : KEYEVENTF_KEYUP) | (vk == VK_HOME ? KEYEVENTF_EXTENDEDKEY : 0);
-                if (SendInput(1, &input, sizeof(input)) == 1) keys[vk] = down;
+                if (down && !fusion_has_focus()) continue;
+                keys.legacy({(unsigned short)buf[1], buf[1] == VK_HOME}, down);
+            } else if (fusion_keys::valid_packet(buf)) {
+                if (!buf[2]) {
+                    // Release the stored press, even after rebinding or a
+                    // keyboard-layout change; never resolve release payloads.
+                    keys.release_button((unsigned int)buf[1]);
+                } else if (fusion_has_focus()) {
+                    fusion_keys::Chord chord;
+                    if (resolve_chord(buf, chord)) keys.press((unsigned int)buf[1], chord);
+                }
             }
         }
-        release_keys();
+        keys.clear();
         // A lost transport must stop a moving camera and release native buttons.
         motion_t zero = {};
         zero.type = SI_ZERO_EVENT;
@@ -255,6 +305,7 @@ DWORD WINAPI RcvThreadFunction(LPVOID)
         LOG(INFO) << "Fusion input bridge disconnected";
         WaitForSingleObject(stop_event, 500);
     }
+    keys.clear();
     return 0;
 }
 

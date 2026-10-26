@@ -146,11 +146,11 @@ class HidDaemonTests(unittest.TestCase):
                 with self.assertRaises(socket.timeout):packet()  # no synthetic HID repeat
                 client.settimeout(2);writer.send(report)
                 self.assertEqual(packet()[1:7],(1,-3,-2,-4,6,5))
-                writer.send(b'\x03\x01\x00');self.assertEqual(packet()[:3],(3,27,1))
+                writer.send(b'\x03\x01\x00');self.assertEqual(packet(),(4,0,1,0,27,0,0,0))
                 for i in range(5):
                     writer.send(b'\x17\x50\x01');writer.send(b'\x1b\x01');time.sleep(.06)
                 self.assertEqual(packet(),(0,0,0,0,0,0,0,0))
-                self.assertEqual(packet()[:3],(3,27,0))
+                self.assertEqual(packet(),(4,0,0,0,27,0,0,0))
                 deadline=time.monotonic()+1
                 while True:
                     state=json.loads((root/'runtime/status.json').read_text())
@@ -162,9 +162,9 @@ class HidDaemonTests(unittest.TestCase):
                 client.settimeout(.03)
                 with self.assertRaises(socket.timeout):packet()  # one neutral event only
                 client.settimeout(2);writer.send(motion([0]*6));self.assertEqual(packet()[1:7],(0,)*6)
-                writer.send(b'\x03\x02\x00');self.assertEqual(packet()[:3],(3,73,1))
+                writer.send(b'\x03\x02\x00');self.assertEqual(packet(),(4,1,1,1,73,0,0,0))
                 writer.close()
-                self.assertEqual(packet(),(0,0,0,0,0,0,0,0));self.assertEqual(packet()[:3],(3,73,0))
+                self.assertEqual(packet(),(0,0,0,0,0,0,0,0));self.assertEqual(packet(),(4,1,0,1,73,0,0,0))
             finally:
                 writer.close();client.close();child.terminate();child.join(3)
                 if child.is_alive():child.kill();child.join()

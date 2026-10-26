@@ -10,6 +10,7 @@
 #include <QtWidgets>
 #include <array>
 #include <unistd.h>
+#include "shortcut.h"
 
 static QString text(const QJsonObject &object, const char *key,
                     const QString &fallback = QStringLiteral("Unknown")) {
@@ -141,6 +142,27 @@ class Manager : public QMainWindow {
     QByteArray statusBytes;
     QTimer refresh, liveRefresh;
 
+    static void selectButtonBinding(QComboBox *combo, const QJsonValue &binding) {
+        int selected = -1, custom = -1;
+        for (int i = 0; i < combo->count(); ++i) {
+            if (combo->itemData(i, Qt::UserRole + 1).toBool()) custom = i;
+            if (QJsonValue::fromVariant(combo->itemData(i)) == binding) selected = i;
+        }
+        if (selected < 0) {
+            if (custom < 0) {
+                combo->insertItem(0, Shortcuts::display(binding), binding.toVariant());
+                combo->setItemData(0, true, Qt::UserRole + 1);
+                selected = 0;
+            } else {
+                combo->setItemText(custom, Shortcuts::display(binding));
+                combo->setItemData(custom, binding.toVariant());
+                selected = custom;
+            }
+        }
+        combo->setCurrentIndex(selected);
+        combo->setProperty("binding", binding.toVariant());
+    }
+
     QPushButton *actionButton(const QString &title, const QString &action, const QStringList &extra = {},
                               bool primary = false) {
         auto *button = new QPushButton(QString(title).replace("&", "&&"));
@@ -241,7 +263,7 @@ class Manager : public QMainWindow {
                 inversions.append(inverted[i]->isChecked());
             }
             for (auto *button : buttons)
-                binds.append(button->currentData().toString());
+                binds.append(QJsonValue::fromVariant(button->currentData()));
             QJsonObject config{{"deadzone", deadzone->value()},
                                {"enabled", axes},
                                {"inverted", inversions},
@@ -434,11 +456,8 @@ class Manager : public QMainWindow {
                 enabled[i]->setChecked(config["enabled"].toArray()[i].toBool());
                 inverted[i]->setChecked(config["inverted"].toArray()[i].toBool());
             }
-            for (int i = 0; i < 2; ++i) {
-                const int index = buttons[i]->findData(config["buttons"].toArray()[i].toString());
-                if (index >= 0)
-                    buttons[i]->setCurrentIndex(index);
-            }
+            for (int i = 0; i < 2; ++i)
+                selectButtonBinding(buttons[i], config["buttons"].toArray()[i]);
             camera->setValue(s["camera"].toObject()["percent"].toInt(25));
             loaded = true;
         }
@@ -693,12 +712,24 @@ class Manager : public QMainWindow {
             buttons[i]->setObjectName(i == 0 ? "button-left" : "button-right");
             for (const auto &entry :
                  {qMakePair(QString("Cancel · Esc"), QString("ESC")),
-                  qMakePair(QString("Measure · I"), QString("I")), qMakePair(QString("F"), QString("F")),
-                  qMakePair(QString("Home"), QString("HOME")), qMakePair(QString("1"), QString("1")),
-                  qMakePair(QString("2"), QString("2")), qMakePair(QString("3"), QString("3")),
+                  qMakePair(QString("Measure · I"), QString("I")),
+                  qMakePair(QString("Record shortcut…"), QString("__record__")),
                   qMakePair(QString("Native SDK button"), QString("sdk")),
                   qMakePair(QString("No action"), QString("off"))})
                 buttons[i]->addItem(entry.first, entry.second);
+            auto *combo = buttons[i];
+            combo->setProperty("binding", combo->currentData());
+            connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [combo](int index) {
+                if (combo->itemData(index).toString() != "__record__")
+                    combo->setProperty("binding", combo->itemData(index));
+            });
+            connect(combo, qOverload<int>(&QComboBox::activated), this, [this, combo, i](int index) {
+                if (combo->itemData(index).toString() != "__record__") return;
+                const auto previous = QJsonValue::fromVariant(combo->property("binding"));
+                Shortcuts::Recorder recorder(i == 0 ? "Left button" : "Right button", this);
+                selectButtonBinding(combo, recorder.exec() == QDialog::Accepted
+                                               ? QJsonValue(recorder.binding()) : previous);
+            });
             form->addRow(i == 0 ? "Left" : "Right", buttons[i]);
             mutationControls << buttons[i];
         }
@@ -732,7 +763,8 @@ class Manager : public QMainWindow {
         columns->addWidget(
             panel(
                 "Buttons & camera",
-                "Keyboard actions are sent only to focused Fusion. Held keys are released "
+                "Choose Record shortcut to assign any supported key or modifier combination. "
+                "Modifier keys can also be held on their own. Keyboard actions are sent only to focused Fusion. Held keys are released "
                 "on focus loss or disconnect. Save input applies axis and button settings within one second. "
                 "Camera Apply queues the selected speed for the next launch; it does not modify a running "
                 "Fusion session.",

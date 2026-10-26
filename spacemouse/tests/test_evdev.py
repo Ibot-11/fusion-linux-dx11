@@ -14,6 +14,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from evdev_input import Decoder, DEFAULTS, EVENT, HeldMotion, PACKET, discover, settings, transform
+from keybindings import button_packet
+
+def key_packet(button, down, binding):
+    return PACKET.unpack(button_packet(button, down, binding))
 
 
 def event(kind, code, value, stamp=1000000):
@@ -163,25 +167,27 @@ class DaemonTests(unittest.TestCase):
                 os.write(write_fd,report([0]*6,1008000))
                 while packet()[1:7]!=(0,0,0,0,0,0):pass
                 os.write(write_fd,event(1,256,1)+event(1,256,2)+event(1,256,0)+event(1,257,1)+event(1,257,0))
-                self.assertEqual([packet()[:3] for _ in range(4)],[(3,27,1),(3,27,0),(3,73,1),(3,73,0)])
+                self.assertEqual([packet() for _ in range(4)],[key_packet(0,True,'ESC'),key_packet(0,False,'ESC'),key_packet(1,True,'I'),key_packet(1,False,'I')])
                 config=dict(DEFAULTS,buttons=['ESC','ESC'])
                 (root/'device.json').write_text(json.dumps(config))
                 time.sleep(1.1)  # wait for the daemon's documented reload interval
                 os.write(write_fd,event(1,256,1)+event(1,257,1)+event(1,256,0))
-                self.assertEqual(packet()[:3],(3,27,1))
-                client.settimeout(.05)
-                with self.assertRaises(socket.timeout):packet()  # right still holds ESC
-                client.settimeout(2)
+                self.assertEqual([packet() for _ in range(3)],[key_packet(0,True,'ESC'),key_packet(1,True,'ESC'),key_packet(0,False,'ESC')])
+                # Physical ownership stays on the wire; the DLL retains ESC
+                # until the second button releases its duplicate chord.
                 os.write(write_fd,event(1,257,0))
-                self.assertEqual(packet()[:3],(3,27,0))
-                os.write(write_fd,event(1,256,1));self.assertEqual(packet()[:3],(3,27,1))
+                self.assertEqual(packet(),key_packet(1,False,'ESC'))
+                os.write(write_fd,event(1,256,1));self.assertEqual(packet(),key_packet(0,True,'ESC'))
                 (root/'device.json').write_text(json.dumps(dict(DEFAULTS,buttons=['I','ESC'])))
                 time.sleep(1.1)
-                os.write(write_fd,event(1,256,0));self.assertEqual(packet()[:3],(3,27,0))  # original binding released
-                os.write(write_fd,event(1,256,1));self.assertEqual(packet()[:3],(3,73,1))
+                os.write(write_fd,event(1,256,0));self.assertEqual(packet(),key_packet(0,False,'ESC'))  # original binding released
+                custom={'key':'S','modifiers':['CTRL','SHIFT']}
+                (root/'device.json').write_text(json.dumps(dict(DEFAULTS,buttons=[custom,'ESC'])))
+                time.sleep(1.1)
+                os.write(write_fd,event(1,256,1));self.assertEqual(packet(),key_packet(0,True,custom))
                 os.close(write_fd);write_fd=None
                 self.assertEqual(packet(),(0,0,0,0,0,0,0,0))
-                self.assertEqual(packet()[:3],(3,73,0))
+                self.assertEqual(packet(),key_packet(0,False,custom))
             finally:
                 if write_fd is not None:os.close(write_fd)
                 client.close();process.terminate();process.join(3)

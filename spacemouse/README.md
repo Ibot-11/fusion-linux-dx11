@@ -97,10 +97,32 @@ and evdev axes. Axis options are applied after complete report decoding.
 
 Defaults in `device.json`: deadzone 0, all axes enabled, no added inversions,
 left button ESC (cancel), right button I (measure). The UI can disable/invert
-individual mapped axes, explicitly set a deadzone, and assign whitelisted keys,
-a native SDK button or no action. The daemon reloads saved settings within one
+individual mapped axes, explicitly set a deadzone, and assign a single key or
+modifier chord, a native SDK button or no action. The daemon reloads saved settings within one
 second. Rebinding a held button retains its original action through release;
-identical bindings share a single held virtual key until the last button releases.
+identical keys and shared chord modifiers remain held until their last owner
+releases. A button holds its shortcut for the duration of the physical press;
+it does not run a macro or repeated command sequence.
+
+Existing `ESC`, `I`, `F`, `HOME`, `1`, `2`, `3`, `off` and `sdk` strings stay valid.
+A custom shortcut uses `{"key":"S","modifiers":["CTRL","SHIFT"]}`. Modifier names
+are `CTRL`, `SHIFT`, `ALT`, `META` and `ALTGR`; use a modifier as `key` for a
+modifier-only hold, such as `{"key":"CTRL","modifiers":[]}`. Keys can be one
+printable Unicode BMP character or a named key: `ESC`, `TAB`, `ENTER`,
+`BACKSPACE`, `DELETE`, `INSERT`, `HOME`, `END`, `PAGEUP`, `PAGEDOWN`, `LEFT`,
+`RIGHT`, `UP`, `DOWN`, `PAUSE`, `PRINTSCREEN`, `CAPSLOCK`, `NUMLOCK`,
+`SCROLLLOCK`, `MENU`, `SPACE`, `F1`–`F24`, `NUM0`–`NUM9`, `NUMENTER`, `NUMADD`,
+`NUMSUBTRACT`, `NUMMULTIPLY`, `NUMDIVIDE`, or `NUMDECIMAL`.
+
+The focused Windows thread's keyboard layout resolves printable characters via
+[VkKeyScanExW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-vkkeyscanexw).
+Letters resolve in lowercase; explicit `SHIFT` controls case. Punctuation adds
+the modifiers required by that layout. `ALTGR` uses left Ctrl and right Alt;
+layout-generated Ctrl+Alt resolves to that same pair. An unavailable character
+is ignored with a DLL diagnostic; this is a physical shortcut facility, not an
+IME/text-composition interface. Desktop/application-reserved shortcuts can be
+intercepted or ignored by the operating system. Qt and Wine should use matching
+keyboard layouts when assigning layout-dependent punctuation.
 
 ## Bridge and lifecycle
 
@@ -109,13 +131,21 @@ It opens the preferred reviewed HID input (or the limited evdev fallback) and
 listens on 127.0.0.1:11111 for Fusion.
 There is no spacenav socket. The binary protocol remains eight little-endian
 int32 fields: type 0 contains six complete axes plus period; types 1/2 carry
-native SDK button down/up. New type 3 contains a whitelisted Windows virtual
-key, down/up flag and reserved zero modifier field. Malformed/unrecognized
-keyboard packets are ignored by the DLL.
+native SDK button down/up. Type 3 remains backward compatible with the old
+whitelisted virtual-key packets. New type 4 is
+`[4, button_id, down, encoding, key, modifiers, flags, 0]`: button ID 0/1,
+boolean down, encoding 0 for a named Windows VK or 1 for a printable BMP
+codepoint, modifier bits Ctrl=1/Shift=2/Alt=4/Meta=8/AltGr=16, and flags=1 for
+an extended named key (otherwise 0). Modifier-only holds use encoding 0/key 0.
+The DLL validates every field and rejects malformed/unrecognized packets.
 
 Keyboard down is accepted only while a window of the actual Fusion process
 has foreground focus. Down/up are sent through Win32 SendInput in that process;
-repeated downs are ignored, and held keys release on focus loss (checked every
+repeated physical downs are ignored. Presses retain their resolved keys through
+rebinding/layout changes; main keys release before modifiers. Separate physical
+buttons share references to overlapping keys (Ctrl+S with Ctrl+Z, or identical
+chords), while ordinary Enter and extended keypad Enter remain distinct.
+Held keys release on focus loss (checked every
 50 ms), socket disconnect or SDK teardown. The DLL reconnects automatically
 after a bridge restart, including when the bridge was absent at initialization. TCP fragmentation cannot block that
 focus check. No global Linux keyboard device is created. No SDK event is also
@@ -148,10 +178,17 @@ port. The access-action tests mock pkexec and never install a real rule.
 coordinate mapping, buttons, frame fragmentation, SYN_DROPPED, held states,
 zero, disconnect and an actual pipe→daemon→TCP path on a private test port.
 Optional `proton_probe.py` and `keyboard_probe.py` exercise the actual compiled
-Windows DLL, six axes, period, native buttons, keyboard down/up, focus loss,
+Windows DLL, six axes, period, native buttons, legacy/custom keys, shared
+modifiers, modifier-only holds, keypad Enter, German ?/@ layout mapping and
+ä mapping (or safe rejection when Wine exposes no matching key), focus loss,
 transport reconnect and teardown. They require a dedicated Wine prefix/display
 and a probe DLL compiled with `-DFUSION_BRIDGE_PORT=11112` (or TEST_PORT), so
 production port 11111 and a running Fusion session remain untouched.
+`tests/test_keybindings.py` validates saved schemas and packet fields and
+compiles/runs the actual portable DLL chord tracker using a C++17 compiler.
+It covers duplicate/overlapping ownership, release order, rebinding, failed
+injection/release retry and packet rejection. Run all reader/binding tests with
+`python3 -m unittest discover -s spacemouse/tests -p 'test_*.py'`.
 
 ## Camera speed without reducing input precision
 

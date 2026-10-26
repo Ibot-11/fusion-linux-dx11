@@ -13,10 +13,10 @@ import tempfile
 import time
 from evdev_input import DEFAULTS, Decoder, HeldMotion, PACKET, transform, axis_state, button_state, discover, settings
 from hidraw_input import Decoder as HidDecoder, MotionWatchdog, discover as discover_hidraw
+from keybindings import button_packet
 
 ROOT = Path(__file__).resolve().parent
 RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')) / 'autodesk-fusion-spacemouse'
-KEYS = {'ESC': 0x1b, 'I': 0x49, 'F': 0x46, 'HOME': 0x24, '1': 0x31, '2': 0x32, '3': 0x33}
 PORT = 11111
 stopping = False
 
@@ -41,14 +41,6 @@ def write_status(state):
         os.replace(name, RUNTIME / 'status.json')
     finally:
         Path(name).unlink(missing_ok=True)
-
-
-def button_packet(index, pressed, action):
-    if action == 'sdk':
-        return PACKET.pack(1 if pressed else 2, index, 0, 0, 0, 0, 0, 0)
-    if action in KEYS:
-        return PACKET.pack(3, KEYS[action], int(pressed), 0, 0, 0, 0, 0)
-    return None
 
 
 def open_input(candidate):
@@ -133,11 +125,9 @@ def main():
             state.update(axes=value, raw=list(decoder.raw))
         else:
             action = config['buttons'][value] if extra else active_actions.pop(value, 'off')
-            duplicate = action != 'sdk' and action in active_actions.values()
             if extra:
                 active_actions[value] = action
-            if not duplicate:
-                broadcast(button_packet(value, extra, action))
+            broadcast(button_packet(value, extra, action))
             state['buttons'][value] = extra
 
     signal.signal(signal.SIGTERM, stop)
@@ -225,7 +215,7 @@ def main():
                         # buffer avoids truncating the reviewed 13-byte report.
                         data = os.read(device, 64 if mode == 'hidraw' else 4096)
                         if not data:
-                            raise OSError('SpaceMouse getrennt')
+                            raise OSError('SpaceMouse disconnected')
                         events = decoder.feed(data, time.monotonic()) if mode == 'hidraw' else decoder.feed(data)
                         for event in events:
                             input_event(*event)

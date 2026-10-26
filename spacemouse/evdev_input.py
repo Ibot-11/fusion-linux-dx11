@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import struct
+from keybindings import normalize_binding
 
 EVENT = struct.Struct('@llHHi')  # Linux input_event; native timeval ABI
 PACKET = struct.Struct('<8i')
@@ -27,9 +28,10 @@ def settings(path):
         raise ValueError('Deadzone must be between 0 and 100.')
     for name in ('enabled', 'inverted'):
         if not isinstance(result[name], list) or len(result[name]) != 6 or any(type(x) is not bool for x in result[name]):
-            raise ValueError('Sechs boolesche Achseneinstellungen erforderlich.')
-    if not isinstance(result['buttons'], list) or len(result['buttons']) != 2 or any(x not in ('off', 'sdk', 'ESC', 'I', 'F', 'HOME', '1', '2', '3') for x in result['buttons']):
-        raise ValueError('Unbekannte Tastenbelegung.')
+            raise ValueError('Six boolean axis settings are required.')
+    if not isinstance(result['buttons'], list) or len(result['buttons']) != 2:
+        raise ValueError('Two button bindings are required.')
+    result['buttons'] = [normalize_binding(binding) for binding in result['buttons']]
     return result
 
 

@@ -27,6 +27,9 @@ jobs:
         run: |
           python3 -m unittest discover -s spacemouse/tests -p test_evdev.py -v
           python3 -m unittest discover -s spacemouse/tests -p test_hidraw.py -v
+          python3 -m unittest discover -s spacemouse/tests -p test_keybindings.py -v
+      - name: Shortcut recorder tests
+        run: make -C manager check
       - name: Native manager smoke test
         env:
           QT_QPA_PLATFORM: offscreen
