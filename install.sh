@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Autodesk Fusion Linux setup and updates. No system packages are installed.
 set -euo pipefail
-VERSION="1.1.0"
+VERSION="1.2.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/autodesk-fusion"
 MODE="menu"
 SPACE="auto"
 INSTALLER=""
+REQUESTED_PREFIX=""
+REQUESTED_PROTON=""
 
 usage() {
   cat <<'HELP'
@@ -18,6 +20,8 @@ Verwendung: ./install.sh [MODUS] [INSTALLATIONSORDNER] [OPTIONEN]
   --build-layer       Nur den Vulkan-Layer kompilieren
   --with-spacemouse   SpaceMouse-Unterstützung bauen und aktivieren
   --without-spacemouse SpaceMouse-Komponente nicht installieren/ändern
+  --prefix NAME       Prefix-Ordner für eine Neuinstallation
+  --proton ORDNER     Installierten Proton-Ordner verwenden
   --installer DATEI   Vorhandene Autodesk-Installer-EXE für --clean
   --version, -v       Version anzeigen
   --help, -h          Diese Hilfe
@@ -36,6 +40,8 @@ while (($#)); do
       ;;
     --with-spacemouse) SPACE=on ;;
     --without-spacemouse) SPACE=off ;;
+    --prefix) shift; REQUESTED_PREFIX="${1:?--prefix benötigt einen Ordnernamen}" ;;
+    --proton) shift; REQUESTED_PROTON="${1:?--proton benötigt einen Ordnerpfad}" ;;
     --installer) shift; INSTALLER="${1:?--installer benötigt einen Dateipfad}" ;;
     --*) echo "Unbekannte Option: $1" >&2; usage; exit 1 ;;
     *) TARGET_DIR="$1" ;;
@@ -94,14 +100,21 @@ fi
 if [[ "$MODE" == patch && ! -d "$TARGET_DIR" ]]; then
   echo "Installation fehlt: $TARGET_DIR; für eine neue Installation --clean verwenden." >&2; exit 1
 fi
-if [[ "$MODE" == clean && ( -f "$TARGET_DIR/prefix-dir" || -d "$TARGET_DIR/compatdata-exp-dx11/pfx" ) ]]; then
+if [[ "$MODE" == clean && ( -f "$TARGET_DIR/prefix-dir" || -d "$TARGET_DIR/${REQUESTED_PREFIX:-compatdata-exp-dx11}/pfx" ) ]]; then
   echo 'Hier ist bereits eine Installation vorhanden. Bitte --patch oder --update verwenden.' >&2; exit 1
 fi
 
-PREFIX="compatdata-exp-dx11"
-if [[ "$MODE" == apply-update && -f "$TARGET_DIR/prefix-dir" ]]; then
+PREFIX="${REQUESTED_PREFIX:-compatdata-exp-dx11}"
+if [[ -z "$REQUESTED_PREFIX" && "$MODE" != clean && -f "$TARGET_DIR/prefix-dir" ]]; then
   PREFIX="$(cat "$TARGET_DIR/prefix-dir")"
-elif [[ "$MODE" == patch && ! -d "$TARGET_DIR/$PREFIX" ]]; then
+fi
+python3 - "$PREFIX" <<'PYCODE'
+from pathlib import Path
+import sys
+p=sys.argv[1]
+if not p or Path(p).name != p or p in ('.','..'): raise SystemExit('Ungültiger Prefix-Ordnername.')
+PYCODE
+if [[ "$MODE" == patch && ! -d "$TARGET_DIR/$PREFIX" ]]; then
   SOURCE_PREFIX="compatdata"
   [[ -f "$TARGET_DIR/prefix-dir" ]] && SOURCE_PREFIX="$(cat "$TARGET_DIR/prefix-dir")"
   python3 - "$SOURCE_PREFIX" <<'PYCODE'
@@ -114,12 +127,11 @@ PYCODE
   echo "Erstelle ein isoliertes DX11-Prefix aus $SOURCE_PREFIX …"
   cp -a --reflink=auto "$TARGET_DIR/$SOURCE_PREFIX" "$TARGET_DIR/$PREFIX"
 fi
-python3 - "$PREFIX" <<'PYCODE'
-from pathlib import Path
-import sys
-p=sys.argv[1]
-if not p or Path(p).name != p or p in ('.','..'): raise SystemExit('Ungültiger Prefix-Ordnername.')
-PYCODE
+
+if [[ -n "$REQUESTED_PROTON" ]]; then
+  REQUESTED_PROTON="$(realpath "$REQUESTED_PROTON")"
+  [[ -f "$REQUESTED_PROTON/proton" ]] || { echo 'Der gewählte Proton-Ordner enthält kein proton-Startprogramm.' >&2; exit 1; }
+fi
 
 ENABLE_SPACE=0
 if [[ "$SPACE" == on ]]; then
@@ -128,16 +140,20 @@ elif [[ "$SPACE" == auto ]]; then
   if [[ -f "$TARGET_DIR/spacemouse/start.py" || -f "$TARGET_DIR/spacemouse-enabled" ]]; then
     SPACE=on
   elif [[ "$MODE" != apply-update && -t 0 ]]; then
-    read -rp 'SpaceMouse-Unterstützung mit Einstellungsdialog installieren? [j/N]: ' answer
+    read -rp 'direkte SpaceMouse-Unterstützung installieren? [j/N]: ' answer
     if [[ "${answer:-n}" =~ ^[JjYy] ]]; then SPACE=on; ENABLE_SPACE=1; else SPACE=off; fi
   else
     SPACE=off
   fi
 fi
 
+for manager_tool in c++ pkg-config; do
+  command -v "$manager_tool" >/dev/null || { echo "Fusion Manager benötigt $manager_tool." >&2; exit 1; }
+done
+pkg-config --exists Qt6Widgets || { echo 'Fusion Manager benötigt Qt-6-Widgets-Entwicklungsdateien (qt6-base-dev / qt6-base).' >&2; exit 1; }
 make -C "$SCRIPT_DIR/layer"
+make -C "$SCRIPT_DIR/manager"
 if [[ "$SPACE" == on ]]; then
-  command -v kdialog >/dev/null || { echo 'Bitte kdialog für den SpaceMouse-Einstellungsdialog installieren.' >&2; exit 1; }
   command -v systemctl >/dev/null || { echo 'SpaceMouse benötigt eine systemd-Benutzersitzung.' >&2; exit 1; }
   bash "$SCRIPT_DIR/spacemouse/build.sh"
 fi
@@ -147,6 +163,17 @@ setup_args=(--target "$TARGET_DIR" --prefix "$PREFIX" --version "$VERSION")
 [[ "$SPACE" == on ]] && setup_args+=(--spacemouse)
 [[ "$ENABLE_SPACE" == 1 ]] && setup_args+=(--enable-spacemouse)
 python3 "$SCRIPT_DIR/scripts/setup_runtime.py" "${setup_args[@]}"
+if [[ -n "$REQUESTED_PROTON" ]]; then
+  python3 - "$TARGET_DIR" "$REQUESTED_PROTON" <<'PYCODE'
+from pathlib import Path
+import sys
+app, proton = map(Path, sys.argv[1:])
+proton = proton.expanduser().resolve()
+if not (proton / 'proton').is_file(): raise SystemExit('Der gewählte Proton-Ordner enthält kein proton-Startprogramm.')
+(app / 'proton-version').write_text(proton.name + '\n')
+(app / 'proton-path').write_text(str(proton) + '\n')
+PYCODE
+fi
 
 if [[ "$MODE" == clean ]]; then
   if [[ -z "$INSTALLER" ]]; then
@@ -159,10 +186,10 @@ if [[ "$MODE" == clean ]]; then
   INSTALLER="$(realpath "$INSTALLER")"
   echo 'Bitte dem Autodesk-Setup folgen und Fusion danach schließen.'
   "$TARGET_DIR/run-proton.sh" "$INSTALLER"
-  python3 "$SCRIPT_DIR/scripts/setup_runtime.py" "${setup_args[@]}"
+  python3 "$SCRIPT_DIR/scripts/setup_runtime.py" "${setup_args[@]}" --update
 fi
 
-echo 'Fertig. Start: autodesk-fusion; spätere Updates: autodesk-fusion-update'
+echo 'Fertig. Verwaltung: fusion-manager; Start: autodesk-fusion; Updates: autodesk-fusion-update'
 if [[ "$SPACE" == on ]]; then
-  echo 'SpaceMouse: Einstellungen über „Fusion SpaceMouse“. In Fusion den SpaceMouse-Treiber „Ältere / Legacy“ verwenden.'
+  echo 'SpaceMouse: Achsen, Tasten und Kamera im „Fusion Manager“. In Fusion den SpaceMouse-Treiber „Ältere / Legacy“ verwenden.'
 fi

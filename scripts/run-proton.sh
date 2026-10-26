@@ -65,7 +65,9 @@ mkdir -p "$STEAM_COMPAT_DATA_PATH" "$DXVK_LOG_PATH"
 
 # Locate Proton installation
 PROTON_DIR=""
-if [[ -d "$STEAM_DIR/compatibilitytools.d/$PROTON_VERSION" ]]; then
+if [[ -f "$APP_DIR/proton-path" && -f "$(cat "$APP_DIR/proton-path")/proton" ]]; then
+  PROTON_DIR="$(cat "$APP_DIR/proton-path")"
+elif [[ -d "$STEAM_DIR/compatibilitytools.d/$PROTON_VERSION" ]]; then
   PROTON_DIR="$STEAM_DIR/compatibilitytools.d/$PROTON_VERSION"
 elif [[ -d "$STEAM_DIR/steamapps/common/$PROTON_VERSION" ]]; then
   PROTON_DIR="$STEAM_DIR/steamapps/common/$PROTON_VERSION"

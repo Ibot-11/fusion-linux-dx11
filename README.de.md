@@ -30,6 +30,10 @@ Der Wechsel auf DirectX 11 scheiterte bisher meist an zwei kritischen Problemen:
 
 ## ✨ Features & Technische Lösungen
 
+* **Fusion Manager:**
+  Native Qt-Oberfläche für Installation, echte Fusion-/Repo-Versionen, Git-Updates, Prefix-/Proton-Auswahl und SpaceMouse-Einstellungen.
+* **Direkte SpaceMouse-Anbindung:**
+  Bevorzugter direkter HID-Reader mit Deadzone 0, unveränderten Hardwarecounts und klar begrenztem evdev-Fallback; Achsen, Tasten und Kamerageschwindigkeit zentral einstellen.
 * **Eigener Vulkan-Präsentations-Layer (`libVkLayer_fusion_present_sync`):**
   Fängt `vkQueuePresentKHR` ab und synchronisiert die GPU via `vkQueueWaitIdle` – jedoch **ausschließlich auf dem großen 3D-Canvas** ($\ge 500\times 500$ px im Immediate-Modus). Dadurch wird das grüne Fang-Symbol sofort beim Bewegen aktualisiert, ohne Deadlocks bei schwebenden HUD-Fenstern zu verursachen.
 * **Nativer Microsoft Direct3D Shader-Compiler (`d3dcompiler_47`):**
@@ -55,8 +59,8 @@ Der Wechsel auf DirectX 11 scheiterte bisher meist an zwei kritischen Problemen:
    * Nvidia: Proprietärer Nvidia-Treiber (`nvidia-utils`)
    * Intel: Mesa ANV (`vulkan-intel`)
 3. **Steam:** Installiert mit **Proton - Experimental** (in Steam: Bibliothek $\rightarrow$ Werkzeuge $\rightarrow$ *Proton Experimental* installieren).
-4. **Build-Tools:** `gcc`, `make`, `python3`, Vulkan-Entwicklungsheader; `git` für Updates.
-5. **Optional SpaceMouse:** `g++`, `pkg-config`, Qt-6-Widgets-Entwicklungswerkzeuge, X11-Entwicklungsheader, `kdialog` und eine systemd-Benutzersitzung. Debian/Ubuntu: `build-essential pkg-config libvulkan-dev qt6-base-dev qt6-base-dev-tools libx11-dev kdialog`; Arch/CachyOS: `base-devel vulkan-headers qt6-base libx11 kdialog`.
+4. **Build-Tools und Manager:** C/C++17-Compiler, `make`, `pkg-config`, `python3`, Qt-6-Widgets-Entwicklungsdateien, Vulkan-Header; `git` für Updates. Debian/Ubuntu: `build-essential pkg-config libvulkan-dev qt6-base-dev`; Arch/CachyOS: `base-devel vulkan-headers qt6-base`.
+5. **Optional SpaceMouse:** eine systemd-Benutzersitzung und deren Leserechte auf dem geprüften HID-Rohgerät. Bei Bedarf verwendet die ausdrücklich gestartete Rechte-Einrichtung pkexec/Polkit. Kein spacenav, uinput, pip oder Root-Treiber erforderlich.
 
 ---
 
@@ -70,7 +74,11 @@ cd fusion-linux-dx11
 ./install.sh
 ```
 
-Das Menü bietet Installation, Aktualisierung und separaten Layer-Build:
+Der native **Fusion Manager** startet bereits vor der Installation mit
+`./manager/run.sh`, danach als `fusion-manager` oder über das Anwendungsmenü.
+Er verwaltet Installation, Git-Stand/Updates, Prefix/Proton, Start und SpaceMouse.
+Siehe [Bedienung und Tests](manager/README.md). Das Installer-Menü und die
+Kommandozeilenmodi bleiben verfügbar:
 
 ### Option 1: Vorhandene Installation patchen (Empfohlen)
 Falls du Fusion 360 bereits über ein anderes Skript (z. B. cryinkfly / Fusion180) installiert hast:
@@ -120,18 +128,28 @@ Im Installer SpaceMouse auswählen oder bei einer vorhandenen Installation ergä
 ./install.sh --apply-update --with-spacemouse
 ```
 
-Der Installer baut den privaten FreeSpacenav-Treiber, das Relay und die
-Qt-Einstellungsanwendung aus den mitgelieferten Quellen. Die passende x86_64-SDK-DLL
-liegt samt vollständigem Quellcode bei; mit installiertem MinGW wird sie neu gebaut.
-Der Build benötigt keine weiteren Code-Downloads und installiert keinen Root-Treiber.
+Der Installer baut den nativen Qt Fusion Manager und installiert einen eigenen
+direkten HID-Reader für das geprüfte USB-256f:c652-Profil, einen ausdrücklich
+eingeschränkten evdev-Fallback und die passende quelloffene Wine-SDK-DLL. spacenav,
+separates Relay und virtuelle globale Tastatur entfallen. Mit MinGW lässt sich
+die DLL neu bauen; alternativ liegt eine SHA-256-geprüfte x86_64-Version bei.
 Getestet wurde die **SpaceMouse Wireless am USB-Universal-Receiver**.
 
-Im Anwendungsmenü **Fusion SpaceMouse** öffnen: Dort lassen sich Kamerageschwindigkeit,
-Achsen und Tasten einstellen. `fusion-spacemouse.service` startet den Treiber bei
-Bedarf. Der Gerätezugriff verwendet die Eingaberechte der Desktop-Sitzung. Bei
-fehlendem Zugriff helfen `journalctl --user -u fusion-spacemouse.service` und die
-Eingabegeräte-Einstellungen der Distribution. Es wird keine global beschreibbare
-Geräteregel eingerichtet.
+Unter **Fusion Manager → SpaceMouse** stehen Live-Achsen, Tastenbelegung und
+Kamerageschwindigkeit bereit. Die Standard-Deadzone ist 0, links/rechts sind
+ESC/I und wirken nur bei Fusion-Fokus. Der Benutzerdienst verwendet die
+vorhandenen Leserechte der Desktop-Sitzung. Fehlender HID-Zugriff steht als
+**Rohzugriff einrichten** im Manager. Nur auf Klick startet **Gerätezugriff
+einrichten** einen festen Helfer über pkexec, der eine enge uaccess-Regel anlegt;
+danach den Empfänger neu anschließen. Es gibt keine global beschreibbare Regel
+oder Root-Dauerdienst. Im evdev-Fallback endet konstantes Halten nach 250 ms
+ohne ABS-Änderung; vollständige Haltebewegungen benötigen deshalb direkten HID-
+Zugriff. HID-Reports werden ohne künstliche Wiederholung weitergereicht; 250 ms
+ohne Motionreport neutralisieren aus Sicherheitsgründen, auch bei weiter
+eintreffenden Batterie-/Statusreports. Die nativen Hardwarecounts
+bleiben mit Mapping [X,-Z,-Y,RX,-RZ,-RY] erhalten. Die alte Ganzzahlnormalisierung
+±350→±500 entfällt; derselbe erhaltene Prozentwert kann sich daher langsamer
+anfühlen. Details zu [Eingabevertrag und Migration](spacemouse/README.md).
 
 Die Brücke wählt vor dem Fusion-Start automatisch den SpaceMouse-Treiber
 **Ältere / Legacy**. Die portable Kameravorgabe ist 25%; vorhandene Einstellungen
@@ -208,6 +226,6 @@ fusion-linux-dx11/
 ## 📄 Lizenz
 
 Der ursprüngliche Linux-Starter und der Vulkan-Layer stehen unter der MIT-Lizenz.
-SpaceMouse-Brücke, spacenavd und spnavcfg verwenden GPL-3.0-or-later, libspnav
-BSD-3-Clause und MinHook seine eigene BSD-artige Lizenz. Quellen und Lizenztexte
-liegen unter `spacemouse/` und `third_party/spacenav/` bei.
+Der native Manager und die SpaceMouse-Brücke verwenden GPL-3.0-or-later,
+MinHook seine eigene BSD-artige Lizenz. Quellen und Lizenztexte
+liegen unter `spacemouse/` bei. Die früher vendorten spacenav-Komponenten wurden entfernt.

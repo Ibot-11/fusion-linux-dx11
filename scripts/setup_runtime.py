@@ -16,13 +16,13 @@ sys.path.insert(0, str(REPO / "spacemouse"))
 from processes import fusion_running
 
 RUNTIME_FILES = ("launch.sh", "run-proton.sh", "switch-mode.sh", "browser-listener.py",
-                 "browser-request.py", "callback.py", "window-fix.py", "update.py")
-SPACE_HELPERS = ("start.py", "processes.py", "control.py", "install-sdk.py",
+                 "browser-request.py", "callback.py", "window-fix.py", "update.py", "manager_backend.py", "manager.sh")
+SPACE_HELPERS = ("start.py", "evdev_input.py", "hidraw_input.py", "processes.py", "control.py", "install-sdk.py",
                  "camera_gain.py", "camera-settings.sh", "settings.sh")
 MANAGED = (*RUNTIME_FILES, "processes.py", "panel-fix.exe", "panel-fix.c",
            "libVkLayer_fusion_present_sync.so", "VkLayer_fusion_present_sync.json",
            "vendor", "spacemouse", "dxvk.conf", "dxvk.conf.dist", "prefix-dir",
-           "proton-version", "repo-state.json", "spacemouse-enabled")
+           "proton-version", "proton-path", "repo-state.json", "spacemouse-enabled", "fusion-manager", "gpu.conf")
 
 
 def atomic_write(path, data, mode=0o644):
@@ -65,7 +65,7 @@ def snapshot(app):
         dest = backup / name
         if source.is_dir():
             shutil.copytree(source, dest, symlinks=True,
-                            ignore=shutil.ignore_patterns("__pycache__", "backups", "previous-installation"))
+                            ignore=shutil.ignore_patterns("__pycache__", "backups"))
         else:
             shutil.copy2(source, dest)
         files.append(name)
@@ -87,6 +87,34 @@ def repository_state(repo, version):
         except subprocess.CalledProcessError:
             pass
     return state
+
+
+def migrate_gpu_preferences(app):
+    """Preserve known literal GPU overrides from an older custom launcher.
+
+    Read shell syntax as data only; never evaluate a previous launcher. An
+    existing gpu.conf remains authoritative and is never modified here.
+    """
+    import re
+    import shlex
+    target, launcher = app / "gpu.conf", app / "run-proton.sh"
+    if target.exists() or not launcher.is_file():
+        return
+    values = {}
+    for line in launcher.read_text().splitlines():
+        match = re.fullmatch(r"\s*export (VK_DRIVER_FILES|DXVK_FILTER_DEVICE_NAME|DRI_PRIME|DXVK_STATE_CACHE)=(.+?)\s*", line)
+        if not match or any(c in match[2] for c in ("$", "`", ";")):
+            continue
+        try:
+            parsed = shlex.split(match[2])
+        except ValueError:
+            continue
+        if len(parsed) == 1:
+            values[match[1]] = parsed[0]
+    if values:
+        data = "# Preserved static GPU preferences from the previous launcher.\n"
+        data += "".join(f"export {key}={shlex.quote(value)}\n" for key, value in values.items())
+        atomic_write(target, data.encode(), 0o600)
 
 
 def desktop_entry(app, executable, name, comment, terminal=False, icon="autodesk-fusion"):
@@ -112,7 +140,9 @@ def deploy_desktop(app):
     copy_file(REPO / "desktop/autodesk-fusion.png", data / "icons/hicolor/256x256/apps/autodesk-fusion.png")
     local_bin = Path.home() / ".local/bin"
     local_bin.mkdir(parents=True, exist_ok=True)
-    for name, destination in (("autodesk-fusion", "launch.sh"), ("autodesk-fusion-update", "update.py")):
+    atomic_write(apps / "fusion-manager.desktop", desktop_entry(app, "manager.sh", "Fusion Manager", "Fusion, Updates und SpaceMouse verwalten"), 0o755)
+    (apps / "fusion-spacemouse.desktop").unlink(missing_ok=True)
+    for name, destination in (("autodesk-fusion", "launch.sh"), ("autodesk-fusion-update", "update.py"), ("fusion-manager", "manager.sh")):
         link = local_bin / name
         if link.exists() and not link.is_symlink():
             print(f"Vorhandene Datei bleibt erhalten: {link}")
@@ -123,28 +153,57 @@ def deploy_desktop(app):
         subprocess.run(["update-desktop-database", str(apps)], check=False)
 
 
+def clean_legacy_spacemouse(dest):
+    # deploy() has already snapshotted these files and imported their settings.
+    # Restrict deletion to files belonging to the former integration.
+    for name in ("spacenavd", "spconvd", "spconvd.orig", "spnavcfg", "spnavcfg.png",
+                 "COPYING-spacenavd", "COPYING-spnavcfg", "COPYING-libspnav", "LICENSE-libspnav",
+                 "spnavrc", "settings.conf", "buttons.json", "button_mapper.py",
+                 "fusion-spacemouse-gui.py", "versions.json", "sdk-probe.exe", "spacenavd-test.log"):
+        (dest / name).unlink(missing_ok=True)
+    library = dest / "lib"
+    if library.is_dir() and not library.is_symlink():
+        for path in library.glob("libspnav.*"):
+            path.unlink()
+        if not any(library.iterdir()):
+            library.rmdir()
+    for name in ("__pycache__", "previous-installation"):
+        path = dest / name
+        if path.is_symlink():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+
+
 def deploy_spacemouse(repo, app, prefix, service=True, desktop=True, enable=True):
     dest = app / "spacemouse"
     dest.mkdir(exist_ok=True)
     for name in SPACE_HELPERS:
         copy_file(repo / "spacemouse" / name, dest / name, True)
     stage = repo / ".build/spacemouse/runtime"
-    for name in ("spacenavd", "spconvd", "spnavcfg", "siappdll.dll", "spnavcfg.png"):
-        copy_file(stage / "bin" / name, dest / name, name not in ("siappdll.dll", "spnavcfg.png"))
-    (dest / "lib").mkdir(exist_ok=True)
-    for library in (stage / "lib").iterdir():
-        target = dest / "lib" / library.name
-        if library.is_symlink():
-            temporary = target.with_name(".setup-" + target.name)
-            temporary.unlink(missing_ok=True)
-            temporary.symlink_to(os.readlink(library))
-            os.replace(temporary, target)
-        else:
-            copy_file(library, target)
-    for label, license_file in (("spacenavd", "COPYING"), ("libspnav", "LICENSE"), ("spnavcfg", "COPYING")):
-        copy_file(repo / "third_party/spacenav" / label / license_file, dest / ("COPYING-" + label))
-    if not (dest / "settings.conf").exists():
-        atomic_write(dest / "settings.conf", b"grab = false\nled = false\ndead-zone = 5\n")
+    copy_file(stage / "bin/siappdll.dll", dest / "siappdll.dll")
+    copy_file(repo / "spacemouse/bridge/COPYING", dest / "COPYING-bridge")
+    if not (dest / "device.json").exists():
+        # Import only known legacy preferences, never overwrite current ones.
+        import re
+        deadzone = 0
+        legacy = dest / "settings.conf"
+        if legacy.exists():
+            match = re.search(r"^dead-zone\s*=\s*(\d+)\s*$", legacy.read_text(), re.M)
+            if match:
+                deadzone = int(match[1])
+        bindings = ["ESC", "I"]
+        if (dest / "buttons.json").exists():
+            old_buttons = json.loads((dest / "buttons.json").read_text())
+            bindings = [old_buttons.get("left", "ESC"), old_buttons.get("right", "I")]
+        from evdev_input import settings
+        config = {"deadzone": deadzone, "enabled": [True]*6, "inverted": [False]*6, "buttons": bindings}
+        # Validate via a temporary file before creating the migrated settings.
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = Path(temporary) / "device.json"
+            candidate.write_text(json.dumps(config))
+            settings(candidate)
+        atomic_write(dest / "device.json", (json.dumps(config, indent=2) + "\n").encode(), 0o600)
     if not (dest / "camera-gain.json").exists():
         # Portable default: 25% needs no build-specific runtime extension.
         atomic_write(dest / "camera-gain.json", b'{"pan": 1, "zoom": 1, "rotation": 1, "percent": 25}\n')
@@ -153,7 +212,7 @@ def deploy_spacemouse(repo, app, prefix, service=True, desktop=True, enable=True
         config = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
         # systemd's quoted ExecStart also expands percent specifiers.
         path = str(dest / "start.py").replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
-        unit = ('[Unit]\nDescription=Fusion SpaceMouse driver and Wine relay\nStartLimitIntervalSec=30\nStartLimitBurst=3\n\n'
+        unit = ('[Unit]\nDescription=Fusion SpaceMouse direct HID bridge (evdev fallback)\nStartLimitIntervalSec=30\nStartLimitBurst=3\n\n'
                 '[Service]\nType=notify\nNotifyAccess=main\nExecStart=/usr/bin/python3 "' + path + '"\n'
                 'KillMode=control-group\nRestart=on-failure\nRestartSec=2\nTimeoutStartSec=12\nTimeoutStopSec=5\n')
         atomic_write(config / "systemd/user/fusion-spacemouse.service", unit.encode())
@@ -163,9 +222,7 @@ def deploy_spacemouse(repo, app, prefix, service=True, desktop=True, enable=True
         subprocess.run([sys.executable, str(dest / "install-sdk.py"), str(fusion)], check=True)
     if enable:
         (app / "spacemouse-enabled").touch()
-    if desktop:
-        data = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
-        atomic_write(data / "applications/fusion-spacemouse.desktop", desktop_entry(app, "spacemouse/settings.sh", "Fusion SpaceMouse", "Kamerageschwindigkeit, Achsen und Tasten einstellen", icon=str(dest / "spnavcfg.png")), 0o755)
+    clean_legacy_spacemouse(dest)
 
 
 def deploy(repo, app, prefix, version, spacemouse=False, update=False, desktop=True, service=True, enable_spacemouse=False):
@@ -176,9 +233,17 @@ def deploy(repo, app, prefix, version, spacemouse=False, update=False, desktop=T
     app.mkdir(parents=True, exist_ok=True)
     backup = snapshot(app)
     print(f"Sicherung ersetzter Dateien: {backup}")
+    migrate_gpu_preferences(app)
     for name in RUNTIME_FILES:
         copy_file(repo / "scripts" / name, app / name, True)
     copy_file(repo / "spacemouse/processes.py", app / "processes.py")
+    copy_file(repo / ".build/manager/fusion-manager", app / "fusion-manager", True)
+    # Device inspection and queued camera configuration are available even when
+    # the optional SDK integration is disabled.
+    (app / "spacemouse").mkdir(exist_ok=True)
+    for helper in ("processes.py", "evdev_input.py", "hidraw_input.py", "camera_gain.py"):
+        copy_file(repo / "spacemouse" / helper, app / "spacemouse" / helper)
+    copy_file(repo / ".build/manager/fusion-spacemouse-access", app / "spacemouse/fusion-spacemouse-access", True)
     for name in ("panel-fix.exe", "panel-fix.c"):
         copy_file(repo / "bin" / name, app / name, name.endswith(".exe"))
     copy_file(repo / "layer/libVkLayer_fusion_present_sync.so", app / "libVkLayer_fusion_present_sync.so")

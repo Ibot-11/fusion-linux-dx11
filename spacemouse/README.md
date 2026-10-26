@@ -1,74 +1,162 @@
-# Fusion SpaceMouse integration
+# Direct SpaceMouse integration
 
-Use the existing FreeSpacenav driver and Qt `spnavcfg` settings application with
-a reviewed version of Lolig4/DD1984's legacy SDK bridge. Fusion must use its
-**Legacy SpaceMouse driver** (German: **Ältere**). The launcher selects it before
-starting Fusion, preserving other compatibility preferences. This does not
-provide the complete modern 3DxWare feature set.
+The Linux input reader and settings UI are implemented in this repository.
+Runtime input uses Python 3 stdlib and a reviewed direct hidraw profile, with
+a clearly limited evdev fallback. spacenavd,
+libspnav, spnavcfg, a relay process and a virtual keyboard are not used. The
+native Qt 6 Fusion Manager configures the device. The existing reviewed legacy
+Wine SDK bridge remains the compatibility layer inside Fusion. This is not a
+complete modern 3DxWare implementation; radial menus and application profiles
+are outside this component's scope.
 
-The daemon normalizes the physical device axes; the bridge forwards these six
-values, their signs, timing, buttons and stop events without extra remapping or
-batching. Defaults use sensitivity 1.0 and dead zone 5. Confirm the final movement
-and orbit behavior in Fusion against the desired 3Dconnexion behavior.
+## Input contract
 
-`settings.sh` offers camera speed or the official configuration GUI on the private
-driver socket. In spnavcfg, click **Save config** to preserve changes across restarts. A systemd user service
-owns the driver and relay; it starts when Fusion or the settings app needs it.
-The relay listens only on 127.0.0.1:11111. Device access uses the desktop session's
-existing ACL; no root daemon or system package changes are needed.
+The preferred raw input is restricted to the **USB 256f:c652 Universal Receiver**
+with the exact reviewed 448-byte report descriptor, SHA-256
+`bb0ee519344bed4b7f5f8373fa66e1ea1d658362c5f5f9e00155d2fd61c0bfca`.
+Discovery checks the USB HID identity and descriptor, not a device name or
+hidraw index. Four other hidraw interfaces on this receiver have different
+feature-only descriptors and are not selected. Unknown firmware/descriptors
+need an explicitly reviewed profile; the driver does not guess their layout.
+The descriptor and a feature-only counterexample are saved under tests/fixtures/.
 
-`python3 control.py disable` restores the original Fusion DLL before disabling the
-integration. `enable` installs the reviewed DLL and starts the service. Close
-Fusion before changing the integration. Original per-version Fusion DLLs are
-retained in `backups/`; installer/update snapshots are in `../backups/updates/`.
+The profile declares report 1 as six complete signed little-endian 16-bit
+values in -350..350 (13 bytes including report ID), and report 3 as two button
+bits (3 bytes including report ID). One hidraw read is one report: every valid
+motion report, including identical consecutive reports, is forwarded immediately.
+No synthetic HID repetition, batching, filtering or input scaling is performed.
+Report 0x17 exposes Battery Strength 0..100 plus an uninterpreted vendor bit;
+report 0x1b exposes another uninterpreted vendor bit. Neither bit is treated as
+a radio-connection signal. Metadata/button/unknown reports never extend the
+motion safety deadline. No LED output or feature report is written.
 
-## Sources and build
+After **250 ms without a motion report while the last deflection is nonzero**,
+the bridge sends one neutral packet and releases its held actions. Later valid
+motion resumes normally. This deliberately bounds stale input if the radio link
+is lost while the USB receiver stays attached. It is a safety policy, not a
+claim about the receiver's sampling rate or a diagnosis of radio loss. A valid
+zero report and USB disconnect stop immediately. Actual held-cap/report-cadence
+and radio-loss behavior still require a physical test after access is configured;
+the descriptor alone cannot establish either behavior.
 
-- FreeSpacenav/spacenavd: 6cb68b693fc837ba33b7a2fe682f184faf501496 (unchanged)
-- FreeSpacenav/libspnav: 476a17b6087146f95799e3a2a12b4d13cb4d2818 (unchanged)
-- FreeSpacenav/spnavcfg: 84543beeed78c41796890b67b56b10287ad610fd (unchanged)
-- Bridge base: https://codeberg.org/Lolig4/SpaceMouse_Fusion360_Wine,
-  commit 8a60078, with existing local changes and the corrections described in
-  the review report. MinHook sources are included under bridge/build-linux/.
+The **evdev fallback is explicitly incomplete**: it accepts recognized
+3Dconnexion/Logitech devices with all six ABS_X/Y/Z/RX/RY/RZ capabilities, excluding
+virtual button keyboards. SYN_REPORT commits full persistent axis state;
+SYN_DROPPED recovers axes/buttons via EVIOCGABS/EVIOCGKEY. Since evdev suppresses
+unchanged states, its existing bounded continuation can only estimate timing.
+A held deflection is forcibly neutralized after 250 ms without an ABS motion
+frame, even if the cap is still held. The GUI therefore shows **Rohzugriff
+einrichten** for the recognized c652 when raw access is missing, and explains
+that continuous native holding requires the direct HID input. This fallback
+must not be described as full original behavior.
 
-The native relay builds with a POSIX C compiler:
+### One-time access setup
 
+Nothing is elevated during status, installation or startup. If existing session
+ACLs do not grant raw-device read access, explicitly click **Gerätezugriff
+einrichten** in the Manager. `pkexec` asks for administrator authorization and
+runs the fixed compiled `fusion-spacemouse-access` helper. It accepts no command
+arguments, environment-selected target paths, shell text or commands. It can
+only create `/etc/udev/rules.d/70-fusion-spacemouse.rules` with this rule and
+reload udev rules using the fixed `/usr/bin/udevadm control --reload-rules`:
+
+```udev
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ATTRS{idVendor}=="256f", ATTRS{idProduct}=="c652", TAG+="uaccess"
 ```
-cc -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -O2 bridge/relay/main.c -o spconvd
-make -C bridge/build-linux static
-```
 
-Rebuilding the DLL requires the MinGW cross compiler. `make` builds only the static variant
-and does not download MSVC or accept third-party license terms. Build libspnav
-with `--disable-x11` and spnavcfg with Qt 6, placing libspnav on the include/link
-path. The installer uses `build.sh` and the corresponding upstream sources under
-`../third_party/spacenav/`. A matching prebuilt x86_64 DLL is included under
-`prebuilt/` with its SHA-256 for systems without MinGW. New installations default
-to 25% camera speed; updates preserve existing settings and disabled state.
+The rule grants access through the active local seat; it has no MODE=0666 and
+creates no root daemon or global keyboard. It applies only to this receiver's
+USB identity; descriptor checking still selects only the axis input. Existing
+foreign/symlink/unsafe files with the same rule name are refused. **Unplug and
+reconnect the receiver afterwards** in an active local desktop session. No
+service restart is performed by the access helper. Missing pkexec, cancellation
+or denial are reported in the UI/log. If a rule was saved but udev reload failed,
+the helper says so; reboot and reconnect before trying raw input.
 
-## Validation
+For the tested Wireless Universal Receiver (USB 256f:c652), the kernel reports
+six signed ranges -350..350, fuzz=0, flat=0. Each original hardware count is
+preserved. The standard native object-mode mapping is:
 
-`tests/test_relay.py` exercises the real relay with fragmented packets, bursts,
-stop events, both buttons, EOF, reconnect and port conflicts. Set TEST_RELAY to
-the binary path. `tests/test_proton.py` additionally exercises the compiled DLL
-with an actual Proton runner; TEST_RUNTIME names the directory containing the
-relay, DLL and compiled tests/sdk-probe.exe, and TEST_PROTON_RUNNER names the
-Fusion Proton wrapper. The real SpaceMouse service must be stopped for that
-isolated test because both use TCP port 11111. Do not run it during Fusion use.
+| SDK field | evdev source | Sign |
+|---|---|---|
+| TX | ABS_X | + |
+| TY | ABS_Z | − |
+| TZ | ABS_Y | − |
+| RX | ABS_RX | + |
+| RY | ABS_RZ | − |
+| RZ | ABS_RY | − |
 
-The Windows probe checks all six signed axes, period, zero, button press/release,
-peek versus consume, repeated initialization, teardown and reopen. Hardware
-recognition and save/restart persistence were also tested. The final physical
-navigation behavior in Fusion still requires the user's check.
+This reproduces the previous USB coordinate convention, without copying its
+integer range conversion from ±350 to ±500. Consequently the same numerical
+camera percentage may feel slower after migration. The stored 15%/20% etc.
+values are preserved exactly; adjust camera speed if desired, without scaling
+or truncating input integers. No additional hardware bits are claimed.
 
-The driver, GUI and bridge retain their GPL-3.0-or-later licenses; libspnav retains
-its BSD-3-Clause license. The repository's original MIT code stays separate.
+The same signs/permutation apply to both raw-HID fields [X,Y,Z,RX,RY,RZ]
+and evdev axes. Axis options are applied after complete report decoding.
+
+Defaults in `device.json`: deadzone 0, all axes enabled, no added inversions,
+left button ESC (cancel), right button I (measure). The UI can disable/invert
+individual mapped axes, explicitly set a deadzone, and assign whitelisted keys,
+a native SDK button or no action. The daemon reloads saved settings within one
+second. Rebinding a held button retains its original action through release;
+identical bindings share a single held virtual key until the last button releases.
+
+## Bridge and lifecycle
+
+`fusion-spacemouse.service` is a per-user service running only `start.py`.
+It opens the preferred reviewed HID input (or the limited evdev fallback) and
+listens on 127.0.0.1:11111 for Fusion.
+There is no spacenav socket. The binary protocol remains eight little-endian
+int32 fields: type 0 contains six complete axes plus period; types 1/2 carry
+native SDK button down/up. New type 3 contains a whitelisted Windows virtual
+key, down/up flag and reserved zero modifier field. Malformed/unrecognized
+keyboard packets are ignored by the DLL.
+
+Keyboard down is accepted only while a window of the actual Fusion process
+has foreground focus. Down/up are sent through Win32 SendInput in that process;
+repeated downs are ignored, and held keys release on focus loss (checked every
+50 ms), socket disconnect or SDK teardown. The DLL reconnects automatically
+after a bridge restart, including when the bridge was absent at initialization. TCP fragmentation cannot block that
+focus check. No global Linux keyboard device is created. No SDK event is also
+sent when a keyboard action is selected.
+
+The launcher selects Fusion's **Legacy / Ältere** driver before starting Fusion.
+Enable/disable restores/installs the reviewed SDK through `control.py`, with
+per-version original DLL backups under `backups/`. Close Fusion before changing
+the integration. Existing camera-gain.json and device.json survive updates;
+legacy settings.conf dead-zone and buttons.json ESC/I are imported only if
+no device.json exists. Legacy files are left in the update snapshot for review.
+
+## Sources, build and tests
+
+The SDK bridge derives from John Tsiombikas/Luke Nuttall's emulator and
+https://codeberg.org/Lolig4/SpaceMouse_Fusion360_Wine (base commit 8a60078),
+with the reviewed protocol, lifecycle and camera changes in this repository.
+Its license remains GPL-3.0-or-later; included MinHook sources retain their own
+BSD-style license. The direct Linux reader does not link to FreeSpacenav.
+The obsolete vendored spacenav sources and native relay have been removed.
+
+`bash spacemouse/build.sh` builds only the Wine DLL with MinGW when available,
+or validates the matching prebuilt x86_64 DLL using prebuilt/SHA256SUMS. It does
+not download code. `make -C manager` builds the native Qt UI separately.
+`tests/test_hidraw.py` covers the actual descriptor/profile gate, all six signed
+axes and ±1, unchanged reports, buttons, metadata-independent 250-ms watchdog,
+zero and disconnect, plus a real report-boundary→daemon→TCP path on a private
+port. The access-action tests mock pkexec and never install a real rule.
+`tests/test_evdev.py` exercises the fallback decoder, raw count preservation,
+coordinate mapping, buttons, frame fragmentation, SYN_DROPPED, held states,
+zero, disconnect and an actual pipe→daemon→TCP path on a private test port.
+Optional `proton_probe.py` and `keyboard_probe.py` exercise the actual compiled
+Windows DLL, six axes, period, native buttons, keyboard down/up, focus loss,
+transport reconnect and teardown. They require a dedicated Wine prefix/display
+and a probe DLL compiled with `-DFUSION_BRIDGE_PORT=11112` (or TEST_PORT), so
+production port 11111 and a running Fusion session remain untouched.
 
 ## Camera speed without reducing input precision
 
-The settings launcher now offers **Fusion camera speed** and **Axes and buttons**.
-The former queues Fusion camera gains; the latter opens spnavcfg. Keep
-spnavcfg sensitivity at 1.0 when preserving its existing integer input levels.
+The Fusion Manager provides camera speed, axes and button bindings. Camera
+settings do not multiply or quantise the six signed hardware input counts.
 
 Fusion 2705.1.30 has three positive integer camera factors, default 4:
 `SpacemousePan`, `SpacemouseZoom`, and `SpacemouseRotation`, in

@@ -10,20 +10,26 @@ jobs:
       - name: Build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libvulkan-dev qt6-base-dev qt6-base-dev-tools libx11-dev
+          sudo apt-get install -y build-essential pkg-config libvulkan-dev qt6-base-dev qt6-base-dev-tools libx11-dev g++-mingw-w64-x86-64
       - name: Build runtime
         run: |
           make -C layer
+          make -C manager
           bash spacemouse/build.sh
+          (cd spacemouse/prebuilt && sha256sum --check SHA256SUMS)
       - name: Installer and update tests
         run: python3 -m unittest discover -s tests -v
       - name: Calibration and process tests
         run: |
           python3 -m unittest discover -s spacemouse/tests -p test_camera_gain.py -v
           python3 -m unittest discover -s spacemouse/tests -p test_processes.py -v
-      - name: Native relay integration tests
+      - name: Direct input and bridge tests
+        run: |
+          python3 -m unittest discover -s spacemouse/tests -p test_evdev.py -v
+          python3 -m unittest discover -s spacemouse/tests -p test_hidraw.py -v
+      - name: Native manager smoke test
         env:
-          TEST_RELAY: .build/spacemouse/runtime/bin/spconvd
-        run: python3 -m unittest discover -s spacemouse/tests -p test_relay.py -v
+          QT_QPA_PLATFORM: offscreen
+        run: manager/run.sh --smoke-test --target /tmp/fusion-manager-empty
       - name: Shell syntax
         run: bash -n install.sh scripts/*.sh spacemouse/*.sh

@@ -145,6 +145,20 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertEqual(json.loads((self.app / 'repo-state.json').read_text())['version'], 'test-version')
         self.assertTrue(os.access(self.app / 'update.py', os.X_OK))
 
+    def test_static_gpu_preferences_migrate_without_evaluating_shell(self):
+        marker = self.app / 'must-not-exist'
+        (self.app / 'run-proton.sh').write_text(
+            'export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/radeon_icd.json\n'
+            'export DXVK_FILTER_DEVICE_NAME="AMD Radeon RX 7900 XTX"\n'
+            'export DRI_PRIME=1002:744c\n'
+            f'export DXVK_STATE_CACHE=$(touch "{marker}")\n')
+        self.deploy(update=True)
+        text = (self.app / 'gpu.conf').read_text()
+        self.assertIn("export DXVK_FILTER_DEVICE_NAME='AMD Radeon RX 7900 XTX'", text)
+        self.assertIn('export DRI_PRIME=1002:744c', text)
+        self.assertNotIn('DXVK_STATE_CACHE', text)
+        self.assertFalse(marker.exists())
+
     def test_initial_patch_keeps_registry_fixes(self):
         registry = self.app / 'custom-prefix/pfx/user.reg'
         registry.parent.mkdir(parents=True)
@@ -163,7 +177,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
                 self.deploy(update=True)
         self.assertEqual(list(self.app.iterdir()), [])
 
-    @unittest.skipUnless((REPO / '.build/spacemouse/runtime/bin/spnavcfg').exists(), 'Build SpaceMouse first')
+    @unittest.skipUnless((REPO / '.build/spacemouse/runtime/bin/siappdll.dll').exists(), 'Build SpaceMouse first')
     def test_space_settings_and_disabled_state_survive_update(self):
         dest = self.app / 'spacemouse'
         dest.mkdir()
@@ -171,13 +185,17 @@ class RuntimeDeploymentTests(unittest.TestCase):
         speed = b'{"pan": 1, "zoom": 1, "rotation": 1, "runtime_scale": 0.8, "percent": 20}\n'
         (dest / 'settings.conf').write_bytes(settings)
         (dest / 'camera-gain.json').write_bytes(speed)
-        self.deploy(update=True, spacemouse=True)
-        self.assertEqual((dest / 'settings.conf').read_bytes(), settings)
+        backup = self.deploy(update=True, spacemouse=True)
+        self.assertFalse((dest / 'settings.conf').exists())
+        self.assertEqual((backup / 'spacemouse/settings.conf').read_bytes(), settings)
+        self.assertEqual(json.loads((dest / 'device.json').read_text())['deadzone'], 7)
         self.assertEqual((dest / 'camera-gain.json').read_bytes(), speed)
         self.assertFalse((self.app / 'spacemouse-enabled').exists())
-        self.assertTrue((dest / 'lib/libspnav.so.0').is_file())
+        self.assertTrue((dest / 'siappdll.dll').is_file())
+        self.assertTrue((dest / 'evdev_input.py').is_file())
+        self.assertFalse((dest / 'spacenavd').exists())
 
-    @unittest.skipUnless((REPO / '.build/spacemouse/runtime/bin/spnavcfg').exists(), 'Build SpaceMouse first')
+    @unittest.skipUnless((REPO / '.build/spacemouse/runtime/bin/siappdll.dll').exists(), 'Build SpaceMouse first')
     def test_new_space_install_creates_service_and_settings_entry(self):
         with patch.object(setup_runtime.subprocess, 'run') as run:
             setup_runtime.deploy_spacemouse(REPO, self.app, 'custom-prefix')
@@ -186,9 +204,35 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn('$$', unit.read_text())
         self.assertIn('%%', unit.read_text())
         self.assertTrue((self.app / 'spacemouse-enabled').exists())
-        self.assertTrue((self.root / 'data/applications/fusion-spacemouse.desktop').is_file())
+        self.assertFalse((self.root / 'data/applications/fusion-spacemouse.desktop').exists())
         self.assertEqual(json.loads((self.app / 'spacemouse/camera-gain.json').read_text())['percent'], 25)
         self.assertEqual(run.call_args_list[-1].args[0], ['systemctl', '--user', 'daemon-reload'])
+
+    def test_legacy_space_migration_preserves_user_camera_and_buttons(self):
+        dest = self.app / 'spacemouse'
+        dest.mkdir()
+        (dest / 'settings.conf').write_text('dead-zone = 0\n')
+        (dest / 'buttons.json').write_text('{"left":"ESC","right":"I"}')
+        (dest / 'button_mapper.py').write_text('old mapper')
+        (dest / 'spacenavd').write_text('old daemon')
+        (dest / 'lib').mkdir()
+        (dest / 'lib/libspnav.so.0.5').write_text('old lib')
+        (dest / 'my-notes.txt').write_text('preserve')
+        camera = b'{"pan":1,"zoom":1,"rotation":1,"runtime_scale":0.6,"percent":15}\n'
+        (dest / 'camera-gain.json').write_bytes(camera)
+        self.deploy(update=True, spacemouse=True)
+        config = json.loads((dest / 'device.json').read_text())
+        self.assertEqual(config['deadzone'], 0)
+        self.assertEqual(config['buttons'], ['ESC','I'])
+        self.assertEqual((dest / 'camera-gain.json').read_bytes(), camera)
+        self.assertFalse((dest / 'spacenavd').exists())
+        self.assertTrue((self.app / 'fusion-manager').is_file())
+        self.assertTrue((dest / 'hidraw_input.py').is_file())
+        self.assertTrue((dest / 'fusion-spacemouse-access').is_file())
+        self.assertFalse((dest / 'button_mapper.py').exists())
+        self.assertFalse((dest / 'lib').exists())
+        self.assertFalse((dest / 'buttons.json').exists())
+        self.assertEqual((dest / 'my-notes.txt').read_text(), 'preserve')
 
     def test_desktop_exec_quotes_custom_paths(self):
         data = setup_runtime.desktop_entry(self.app, 'update.py', 'Update', 'Update', True).decode()

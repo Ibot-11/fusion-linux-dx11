@@ -28,7 +28,9 @@ int main()
         SiOpenData data = {}; data.win = hwnd;
         SiHdl *handle = open("Fusion SpaceMouse diagnostic", 0, NULL, 0, &data);
         if (!handle) return 4;
-        printf("READY %u\n", cycle);
+        DWORD foreground = 0;
+        GetWindowThreadProcessId(GetForegroundWindow(), &foreground);
+        printf("READY %u foreground=%lu self=%lu\n", cycle, foreground, GetCurrentProcessId());
         snprintf(filename, sizeof(filename), "%s\\ready-%u", directory, cycle);
         FILE *ready = fopen(filename, "w");
         if (ready) { fputs("ready", ready); fclose(ready); }

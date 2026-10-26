@@ -120,21 +120,20 @@ HWND tgt_wndw;
 
 HANDLE ghMutex = NULL;
 HANDLE  hRcvThread = NULL;
-SOCKET sock_fd = INVALID_SOCKET;
+HANDLE stop_event = NULL;
 
 
 void clear_context(void)
 {
     restore_camera_scale();
-    sock_shutdown(sock_fd);
+    if (stop_event) SetEvent(stop_event);
     if (hRcvThread) {
-        // shutdown releases recv; never kill a thread while it owns the queue.
+        // Bounded connect/select waits; never kill a thread owning the queue.
         WaitForSingleObject(hRcvThread, INFINITE);
         CloseHandle(hRcvThread);
         hRcvThread = NULL;
     }
-    sock_close(sock_fd);
-    sock_fd = INVALID_SOCKET;
+    if (stop_event) { CloseHandle(stop_event); stop_event = NULL; }
     m_queue.clear();
     tgt_wndw = NULL;
     if (ghMutex) { CloseHandle(ghMutex); ghMutex = NULL; }
@@ -161,33 +160,100 @@ void collectMotionEvent(motion_t m)
     ReleaseMutex(ghMutex);
 }
 
-DWORD WINAPI RcvThreadFunction(LPVOID lpParam)
+DWORD WINAPI RcvThreadFunction(LPVOID)
 {
-    SOCKET fd = *(SOCKET *)lpParam;
-    unsigned long button_state = 0;
-    while (true) {
-        int buf[8];
-        if (sock_read(fd, (char *)buf, sizeof(buf)) != sizeof(buf)) break;
-        motion_t m = {};
-        if (buf[0] == 0) {
-            bool moving = false;
-            for (int i = 0; i < 7; ++i) {
-                m.data[i] = buf[i + 1];
-                if (i < 6 && buf[i + 1]) moving = true;
-            }
-            m.type = moving ? SI_MOTION_EVENT : SI_ZERO_EVENT;
-            collectMotionEvent(m);
-        } else if ((buf[0] == 1 || buf[0] == 2) && buf[1] >= 0 && buf[1] < 2) {
-            m.type = SI_BUTTON_EVENT;
-            unsigned long bit = 1UL << (buf[1] + 1);
-            m.data[0] = button_state;
-            if (buf[0] == 1) button_state |= bit;
-            else button_state &= ~bit;
-            m.data[1] = button_state;
-            m.data[2] = buf[0] == 1 ? bit : 0;
-            m.data[3] = buf[0] == 2 ? bit : 0;
-            collectMotionEvent(m);
+    while (WaitForSingleObject(stop_event, 0) == WAIT_TIMEOUT) {
+        SOCKET fd = sock_connect(FUSION_BRIDGE_HOST, FUSION_BRIDGE_PORT);
+        if (fd == INVALID_SOCKET) {
+            WaitForSingleObject(stop_event, 500);
+            continue;
         }
+        LOG(INFO) << "Fusion input bridge connected";
+        unsigned long button_state = 0;
+        bool keys[256] = {};
+        auto release_keys = [&]() {
+            for (unsigned int vk = 0; vk < 256; ++vk) {
+                if (!keys[vk]) continue;
+                INPUT input = {};
+                input.type = INPUT_KEYBOARD;
+                input.ki.wVk = (WORD)vk;
+                input.ki.dwFlags = KEYEVENTF_KEYUP | (vk == VK_HOME ? KEYEVENTF_EXTENDEDKEY : 0);
+                SendInput(1, &input, sizeof(input));
+                keys[vk] = false;
+            }
+        };
+        char packet[8 * sizeof(int)];
+        size_t packet_used = 0;
+        while (WaitForSingleObject(stop_event, 0) == WAIT_TIMEOUT) {
+            DWORD foreground_pid = 0;
+            GetWindowThreadProcessId(GetForegroundWindow(), &foreground_pid);
+            if (foreground_pid != GetCurrentProcessId()) release_keys();
+            fd_set ready;
+            FD_ZERO(&ready);
+            FD_SET(fd, &ready);
+            timeval timeout = {0, 50000};
+            int selected = select(0, &ready, NULL, NULL, &timeout);
+            if (selected == 0) continue;
+            if (selected < 0) break;
+            int got = recv(fd, packet + packet_used, (int)(sizeof(packet) - packet_used), 0);
+            if (got <= 0) break;
+            packet_used += (size_t)got;
+            if (packet_used != sizeof(packet)) continue;
+            int buf[8];
+            memcpy(buf, packet, sizeof(buf));
+            packet_used = 0;
+            motion_t m = {};
+            if (buf[0] == 0) {
+                bool moving = false;
+                for (int i = 0; i < 7; ++i) {
+                    m.data[i] = buf[i + 1];
+                    if (i < 6 && buf[i + 1]) moving = true;
+                }
+                m.type = moving ? SI_MOTION_EVENT : SI_ZERO_EVENT;
+                collectMotionEvent(m);
+            } else if ((buf[0] == 1 || buf[0] == 2) && buf[1] >= 0 && buf[1] < 2) {
+                m.type = SI_BUTTON_EVENT;
+                unsigned long bit = 1UL << (buf[1] + 1);
+                m.data[0] = button_state;
+                if (buf[0] == 1) button_state |= bit;
+                else button_state &= ~bit;
+                m.data[1] = button_state;
+                m.data[2] = buf[0] == 1 ? bit : 0;
+                m.data[3] = buf[0] == 2 ? bit : 0;
+                collectMotionEvent(m);
+            } else if (buf[0] == 3 && (buf[1] == VK_ESCAPE || buf[1] == 'I' ||
+                       buf[1] == 'F' || buf[1] == VK_HOME ||
+                       (buf[1] >= '1' && buf[1] <= '3')) &&
+                       (buf[2] == 0 || buf[2] == 1) && buf[3] == 0) {
+                // Protocol 3: whitelisted virtual key, down/up, reserved modifiers.
+                // No global uinput device: key-down only reaches focused Fusion.
+                unsigned int vk = (unsigned int)buf[1];
+                bool down = buf[2] != 0;
+                GetWindowThreadProcessId(GetForegroundWindow(), &foreground_pid);
+                if (down && (foreground_pid != GetCurrentProcessId() || !IsWindow(tgt_wndw))) continue;
+                if (keys[vk] == down) continue;
+                INPUT input = {};
+                input.type = INPUT_KEYBOARD;
+                input.ki.wVk = (WORD)vk;
+                input.ki.dwFlags = (down ? 0 : KEYEVENTF_KEYUP) | (vk == VK_HOME ? KEYEVENTF_EXTENDEDKEY : 0);
+                if (SendInput(1, &input, sizeof(input)) == 1) keys[vk] = down;
+            }
+        }
+        release_keys();
+        // A lost transport must stop a moving camera and release native buttons.
+        motion_t zero = {};
+        zero.type = SI_ZERO_EVENT;
+        collectMotionEvent(zero);
+        if (button_state) {
+            motion_t release = {};
+            release.type = SI_BUTTON_EVENT;
+            release.data[0] = button_state;
+            release.data[3] = button_state;
+            collectMotionEvent(release);
+        }
+        sock_close(fd);
+        LOG(INFO) << "Fusion input bridge disconnected";
+        WaitForSingleObject(stop_event, 500);
     }
     return 0;
 }
@@ -206,13 +272,6 @@ enum SpwRetVal SPWAPI SiInitialize(void)
 
 	LOG(TRACE) << "Stub called: " << __FUNCTION__;
 
-	sock_fd = sock_connect(SPNAV_HOST, SPNAV_PORT);
-	if (sock_fd == INVALID_SOCKET)
-	{
-		LOG(ERROR) << "connection to daemon failed";
-		goto err;
-	}
-
 	if (!(space_ware_message = RegisterWindowMessage("SpaceWareMessage00")))
 	{
 		LOG(ERROR) << "failed to register window message";
@@ -230,11 +289,14 @@ enum SpwRetVal SPWAPI SiInitialize(void)
 		goto err;
 	}
 
+    stop_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!stop_event) goto err;
+
 	hRcvThread = CreateThread(
 		NULL,                   // default security attributes
 		0,                      // use default stack size  
 		RcvThreadFunction,      // thread function name
-		&sock_fd,               // argument to thread function 
+		NULL,                   // argument to thread function
 		0,                      // use default creation flags 
 		NULL);             // returns the thread identifier 
 

@@ -6,4 +6,5 @@ is `dist/siappdll-static.dll`. MinHook's corresponding source is included under
 `siappdll/src` sources. See `../../README.md` for architecture and validation.
 
 The DLL statically links its MinGW runtime and uses the Windows system socket
-interface. The native relay is built separately from `../relay/main.c`.
+interface. Linux input is read directly by `spacemouse/start.py`; no native
+relay or spacenav component is built or required.
