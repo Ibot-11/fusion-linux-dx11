@@ -17,6 +17,7 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 from processes import fusion_running
+from camera_control import create_session
 
 ROOT = Path(__file__).resolve().parent
 KEYS = {"pan": "SpacemousePan", "zoom": "SpacemouseZoom", "rotation": "SpacemouseRotation"}
@@ -154,6 +155,42 @@ def option_file():
     return candidates[0]
 
 
+def apply_settings(gains):
+    """Apply and verify the native factors before a new process is started."""
+    validate_settings(gains)
+    if fusion_running():
+        raise RuntimeError('Fusion is running; its camera XML was left untouched.')
+    path = option_file()
+    old = path.read_bytes() if path.exists() else None
+    initial = '<?xml version="1.0" encoding="UTF-16"?>\n<OptionGroups></OptionGroups>'.encode('utf-16')
+    new = legacy_options(patch_options(old if old is not None else initial, gains))
+    if old != new:
+        backup = ROOT / 'backups/camera-gain'
+        backup.mkdir(parents=True, exist_ok=True)
+        if old is not None:
+            shutil.copy2(path, backup / f'NMachineSpecificOptions-{time.time_ns()}.xml')
+        if (path.read_bytes() if path.exists() else None) != old or fusion_running():
+            raise RuntimeError('Fusion or its settings file changed during the operation')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, new)
+    if fusion_running() or path.read_bytes() != new:
+        raise RuntimeError('Could not verify native camera factors before launch.')
+    return gains
+
+
+def prepare_session():
+    pending = ROOT / 'camera-gain.json'
+    gains = validate_settings(json.loads(pending.read_text())) if pending.exists() else dict.fromkeys(KEYS, 4)
+    apply_settings(gains)
+    factors = [gains[name] for name in KEYS]
+    basis = factors[0] if len(set(factors)) == 1 and factors[0] <= 4 else 0
+    scale = gains.get('runtime_scale', 1.0)
+    actual = 25 * basis * scale
+    percent = round(actual) if basis and abs(actual-round(actual)) < 1e-8 and 1 <= actual <= 100 else 0
+    record = create_session(ROOT.parent, basis, percent)
+    return scale, basis, record['token']
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -161,17 +198,21 @@ def main():
     mode.add_argument("--apply", action="store_true")
     mode.add_argument("--show", action="store_true")
     mode.add_argument("--runtime-scale", action="store_true")
+    mode.add_argument('--prepare-session', action='store_true')
     parser.add_argument("--percent", type=int, choices=range(1, 101), metavar="1..100")
     for name in KEYS:
         parser.add_argument("--" + name, type=int, choices=range(1, 101), default=1, metavar="1..100")
     args = parser.parse_args()
     pending = ROOT / "camera-gain.json"
+    if args.prepare_session:
+        print(*prepare_session())
+        return
     if args.queue:
         gains = (percentage_settings(args.percent) if args.percent is not None
                  else {name: getattr(args, name) for name in KEYS})
         validate_settings(gains)
         atomic_write(pending, (json.dumps(gains, indent=2) + "\n").encode())
-        print("Camera speed saved. Applies when Fusion next starts.")
+        print("Camera speed saved.")
         return
     if args.show:
         print(pending.read_text() if pending.exists() else json.dumps({name: 4 for name in KEYS}))
@@ -183,22 +224,9 @@ def main():
     if not pending.exists():
         return
     if fusion_running():
-        print("Fusion is running. Camera speed will apply at the next start.")
+        print('Native camera factors are left unchanged while Fusion is running.')
         return
-    gains = validate_settings(json.loads(pending.read_text()))
-    path = option_file()
-    old = path.read_bytes() if path.exists() else None
-    initial = '<?xml version="1.0" encoding="UTF-16"?>\n<OptionGroups></OptionGroups>'.encode('utf-16')
-    new = legacy_options(patch_options(old if old is not None else initial, gains))
-    if old != new:
-        backup = ROOT / "backups/camera-gain"
-        backup.mkdir(parents=True, exist_ok=True)
-        if old is not None:
-            shutil.copy2(path, backup / f"NMachineSpecificOptions-{time.time_ns()}.xml")
-        if (path.read_bytes() if path.exists() else None) != old or fusion_running():
-            raise RuntimeError("Fusion or its settings file changed during the operation")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(path, new)
+    gains = apply_settings(validate_settings(json.loads(pending.read_text())))
     print("Fusion camera factors applied: " + json.dumps(gains))
 
 

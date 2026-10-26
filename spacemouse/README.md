@@ -45,16 +45,16 @@ virtual button keyboards. SYN_REPORT commits full persistent axis state;
 SYN_DROPPED recovers axes/buttons via EVIOCGABS/EVIOCGKEY. Since evdev suppresses
 unchanged states, its existing bounded continuation can only estimate timing.
 A held deflection is forcibly neutralized after 250 ms without an ABS motion
-frame, even if the cap is still held. The GUI therefore shows **Rohzugriff
-einrichten** for the recognized c652 when raw access is missing, and explains
+frame, even if the cap is still held. The GUI therefore shows **Raw device access
+required** for the recognized c652 when raw access is missing, and explains
 that continuous native holding requires the direct HID input. This fallback
 must not be described as full original behavior.
 
 ### One-time access setup
 
 Nothing is elevated during status, installation or startup. If existing session
-ACLs do not grant raw-device read access, explicitly click **Gerätezugriff
-einrichten** in the Manager. `pkexec` asks for administrator authorization and
+ACLs do not grant raw-device read access, explicitly click **Set up access**
+in the Manager. `pkexec` asks for administrator authorization and
 runs the fixed compiled `fusion-spacemouse-access` helper. It accepts no command
 arguments, environment-selected target paths, shell text or commands. It can
 only create `/etc/udev/rules.d/70-fusion-spacemouse.rules` with this rule and
@@ -190,10 +190,22 @@ It covers duplicate/overlapping ownership, release order, rebinding, failed
 injection/release retry and packet rejection. Run all reader/binding tests with
 `python3 -m unittest discover -s spacemouse/tests -p 'test_*.py'`.
 
+`tests/test_camera_control.py` checks session/app binding, stale or mismatched
+confirmations, ambiguous clients, preserved startup basis and the running-XML
+guard. The HID daemon test also checks that camera traffic does not extend the
+motion watchdog. Optional `camera_live_probe.py` runs the actual DLL, daemon and
+Manager backend with a separate Proton prefix/display and port 11113. It maps
+the real NuBase10 PE without resolving imports or executing Autodesk functions,
+then checks background updates, late module loading, reconnect, unknown builds
+and refusal to overwrite a foreign normalizer value.
+
 ## Camera speed without reducing input precision
 
-The Fusion Manager provides camera speed, axes and button bindings. Camera
-settings do not multiply or quantise the six signed hardware input counts.
+The Fusion Manager provides camera speed, axes and button bindings. **Apply**
+saves one speed for current and future sessions. A supported running Fusion
+session updates immediately; **Live** appears after its SDK confirms the actual
+normalizer value. Camera settings do not multiply or quantise the six signed
+hardware input counts.
 
 Fusion 2705.1.30 has three positive integer camera factors, default 4:
 `SpacemousePan`, `SpacemouseZoom`, and `SpacemouseRotation`, in
@@ -202,7 +214,7 @@ camera code multiplies the unscaled axis value by the factor, then uses double
 precision camera math. Using factor 1 instead of 4 gives 25% of the default
 camera speed and keeps adjacent integer input levels distinct.
 
-For speeds below 25%, the SDK bridge also adjusts the SpaceMouse camera's shared
+For speeds between the native steps, the SDK bridge adjusts the SpaceMouse camera's shared
 double-precision normalizer in process memory: 1024 / 0.8 = 1280 gives 20% with
 native factor 1. The six integer axis samples remain unchanged. No Autodesk file
 or camera instruction is patched. This extension is deliberately limited to the
@@ -211,10 +223,20 @@ SHA-256 and all six division operands must match. Unrecognized builds or an
 unexpected normalizer are left untouched and produce an error in fusion.log.
 On those builds the native factors still work, with a minimum of 25%.
 
+The launcher records the verified native basis for its session. Live updates use
+`percent / (25 × session basis)`, so changing from a 20% start to 100% does not
+mistake the session's native factor 1 for factor 4. The existing TCP connection
+carries requests and confirmations tied to a private launch token, random request
+challenge and installation. Status exposes a session fingerprint. Old/offline
+DLLs and unsupported camera builds do not produce a live confirmation. A change
+outside the bridge's owned normalizer value is left untouched.
+
 `camera_gain.py --queue --percent 20` saves the desired percentage.
 `--queue --pan 1 --zoom 1 --rotation 1` remains available for separate native gains.
-The Fusion launcher applies them before starting Fusion. While Fusion is open,
-its XML is not modified; changes take effect after a complete restart. Existing
+The Fusion launcher applies native factors before starting Fusion. While Fusion
+is open, its XML is not modified; the SDK changes only its checked floating-point
+normalizer. If live control is unavailable, the saved setting takes effect at
+the next launch. Existing
 XML encoding, unrelated preferences and the Legacy driver setting are preserved.
 Changed files are backed up under `backups/camera-gain/`. The supported native
 factor range is 1..100; values below 1 cannot be represented by these preferences

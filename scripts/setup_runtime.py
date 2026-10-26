@@ -17,7 +17,7 @@ from processes import fusion_running
 
 RUNTIME_FILES = ("launch.sh", "run-proton.sh", "switch-mode.sh", "browser-listener.py",
                  "browser-request.py", "callback.py", "window-fix.py", "update.py", "manager_backend.py", "manager.sh")
-SPACE_HELPERS = ("start.py", "evdev_input.py", "keybindings.py", "hidraw_input.py", "processes.py", "control.py", "install-sdk.py",
+SPACE_HELPERS = ("start.py", "evdev_input.py", "keybindings.py", "camera_control.py", "hidraw_input.py", "processes.py", "control.py", "install-sdk.py",
                  "camera_gain.py", "camera-settings.sh", "settings.sh")
 MANAGED = (*RUNTIME_FILES, "processes.py", "panel-fix.exe", "panel-fix.c",
            "libVkLayer_fusion_present_sync.so", "VkLayer_fusion_present_sync.json",
@@ -242,7 +242,7 @@ def deploy(repo, app, prefix, version, spacemouse=False, update=False, desktop=T
     # Device inspection and queued camera configuration are available even when
     # the optional SDK integration is disabled.
     (app / "spacemouse").mkdir(exist_ok=True)
-    for helper in ("processes.py", "evdev_input.py", "keybindings.py", "hidraw_input.py", "camera_gain.py"):
+    for helper in ("processes.py", "evdev_input.py", "keybindings.py", "camera_control.py", "hidraw_input.py", "camera_gain.py"):
         copy_file(repo / "spacemouse" / helper, app / "spacemouse" / helper)
     copy_file(repo / ".build/manager/fusion-spacemouse-access", app / "spacemouse/fusion-spacemouse-access", True)
     for name in ("panel-fix.exe", "panel-fix.c"):

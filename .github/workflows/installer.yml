@@ -22,6 +22,7 @@ jobs:
       - name: Calibration and process tests
         run: |
           python3 -m unittest discover -s spacemouse/tests -p test_camera_gain.py -v
+          python3 -m unittest discover -s spacemouse/tests -p test_camera_control.py -v
           python3 -m unittest discover -s spacemouse/tests -p test_processes.py -v
       - name: Direct input and bridge tests
         run: |

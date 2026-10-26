@@ -127,7 +127,7 @@ class Manager : public QMainWindow {
     QLabel *inputAccessInfo = label("", "warning"), *inputStateInfo = label("", "muted");
     QWidget *accessPanel = new QWidget;
     QPushButton *cloneButton = nullptr;
-    QLabel *result = label("Ready", "muted"), *cameraHint = label("Next Fusion launch", "muted");
+    QLabel *result = label("Ready", "muted"), *cameraHint = label("Saved for next launch", "muted");
     QPlainTextEdit *log = new QPlainTextEdit;
     QProgressBar *progress = new QProgressBar;
     QSpinBox *deadzone = new QSpinBox, *camera = new QSpinBox;
@@ -249,6 +249,23 @@ class Manager : public QMainWindow {
         statusProc->start("python3", base());
     }
 
+    void updateCameraStatus(const QJsonObject &state) {
+        const QString mode = state["state"].toString();
+        const int percent = state["percent"].toInt();
+        if (mode == "live" && percent >= 1 && percent <= 100)
+            cameraHint->setText(QString("Live · %1 %").arg(percent));
+        else if (mode == "pending")
+            cameraHint->setText("Applying…");
+        else if (mode == "unsupported")
+            cameraHint->setText("Next launch · live unavailable");
+        else
+            cameraHint->setText("Saved for next launch");
+        const QString help =
+            "Apply saves the speed and updates a supported running Fusion session. "
+            "Live confirms the speed reported by Fusion. Input counts remain unchanged. ";
+        cameraHint->setToolTip(help + state["reason"].toString());
+    }
+
     void startAction(const QString &action, QStringList extra = {}) {
         if (busy)
             return;
@@ -299,6 +316,7 @@ class Manager : public QMainWindow {
     void updateStatus(const QJsonObject &s) {
         last = s;
         updateAvailability();
+        updateCameraStatus(s["camera_live"].toObject());
         const auto r = s["repo"].toObject(), installed = s["installed"].toObject();
         const bool present = s["fusion"].isString(), running = s["running"].toBool();
         headline->setText(running ? "●  Running" : present ? "●  Ready" : "Not installed");
@@ -711,9 +729,7 @@ class Manager : public QMainWindow {
             buttons[i] = new QComboBox;
             buttons[i]->setObjectName(i == 0 ? "button-left" : "button-right");
             for (const auto &entry :
-                 {qMakePair(QString("Cancel · Esc"), QString("ESC")),
-                  qMakePair(QString("Measure · I"), QString("I")),
-                  qMakePair(QString("Record shortcut…"), QString("__record__")),
+                 {qMakePair(QString("Record shortcut…"), QString("__record__")),
                   qMakePair(QString("Native SDK button"), QString("sdk")),
                   qMakePair(QString("No action"), QString("off"))})
                 buttons[i]->addItem(entry.first, entry.second);
@@ -750,10 +766,8 @@ class Manager : public QMainWindow {
         cameraRow->addWidget(camera);
         cameraRow->addWidget(actionButton("Apply", "camera"));
         bindings->addLayout(cameraRow);
-        cameraHint->setToolTip(
-            "Camera settings take effect on the next Fusion launch. The speed is applied after "
-            "input decoding, preserving hardware counts. Speeds below 25% require a supported Fusion "
-            "version.");
+        cameraHint->setObjectName("camera-status");
+        updateCameraStatus({});
         bindings->addWidget(cameraHint);
         bindings->addStretch();
         auto *save = new QHBoxLayout;
@@ -766,8 +780,9 @@ class Manager : public QMainWindow {
                 "Choose Record shortcut to assign any supported key or modifier combination. "
                 "Modifier keys can also be held on their own. Keyboard actions are sent only to focused Fusion. Held keys are released "
                 "on focus loss or disconnect. Save input applies axis and button settings within one second. "
-                "Camera Apply queues the selected speed for the next launch; it does not modify a running "
-                "Fusion session.",
+                "Camera Apply saves the speed and changes a supported running Fusion session immediately. "
+                "Live confirms the current speed; otherwise the setting is saved for the next launch. "
+                "Input counts remain unchanged.",
                 bindings),
             1);
         for (int i = 0; i < columns->count(); ++i)
@@ -883,6 +898,28 @@ class Manager : public QMainWindow {
             state = QJsonDocument::fromJson(file.readAll()).object();
         const double age = QDateTime::currentMSecsSinceEpoch() / 1000. - state["timestamp"].toDouble();
         const bool fresh = state["timestamp"].isDouble() && age >= 0 && age <= 3;
+        const QString selectedApp = QFileInfo(target->text()).canonicalFilePath();
+        const auto reportedCamera = state["camera_live"].toObject();
+        const auto expectedCamera = last["camera_live"].toObject();
+        const QString session = expectedCamera["session"].toString();
+        const bool currentSession = !session.isEmpty() && reportedCamera["session"] == session &&
+                                    (!expectedCamera["pid"].isDouble() ||
+                                     reportedCamera["pid"] == expectedCamera["pid"]);
+        const double cameraAge = QDateTime::currentMSecsSinceEpoch() / 1000. -
+                                 reportedCamera["updated"].toDouble();
+        const bool confirmed = reportedCamera["state"] != "live" ||
+                               (reportedCamera["updated"].isDouble() && cameraAge >= 0 && cameraAge < 2.5);
+        if (fresh && !selectedApp.isEmpty() &&
+            QFileInfo(state["app"].toString()).canonicalFilePath() == selectedApp &&
+            currentSession && confirmed) {
+            updateCameraStatus(reportedCamera);
+        } else {
+            auto cameraState = last["camera_live"].toObject();
+            if (cameraState["state"] == "live" || cameraState["state"] == "pending")
+                cameraState = {{"state", "saved"},
+                               {"reason", "No fresh camera confirmation for this installation."}};
+            updateCameraStatus(cameraState);
+        }
         QString inputState = "Input offline";
         if (fresh) {
             inputState = state["input_backend"].toString() == "hidraw"  ? "Direct HID"

@@ -45,16 +45,42 @@ int main(int argc, char** argv) {
         }
     }
     *normalizer = original;
-    for (double scale : {0., -1., 1.1, std::numeric_limits<double>::quiet_NaN()}) {
+    for (double scale : {0., -1., .009, 4.1, std::numeric_limits<double>::quiet_NaN()}) {
         assert(!set_camera_normalizer(normalizer, scale));
         assert(*normalizer == original);
     }
     *normalizer = 512.; // Unexpected concurrent/custom value is not overwritten.
     assert(!set_camera_normalizer(normalizer, .8));
     *normalizer = original;
+    // A launch at any native factor (including an old 15% / basis-1 launch)
+    // can change across the full percentage range without touching integers
+    // or pretending the newly saved next-start basis is already in memory.
+    for(int basis=1;basis<=4;++basis) {
+        for(int percent:{15,100,1,75,20,50,25,100,1}) {
+            auto result=update_camera_percent(module,basis,percent);
+            assert(result.status==0 && result.percent==percent);
+            assert(std::abs(*normalizer-1024.*25*basis/percent)<1e-8);
+            for(int sample=-350;sample<=350;++sample) {
+                double actual=double(sample*basis)/ *normalizer;
+                assert(std::abs(actual-double(sample*4)/1024.*percent/100.)<1e-14);
+                assert(actual!=double((sample+1)*basis)/ *normalizer);
+            }
+        }
+        restore_camera_scale();assert(*normalizer==original);
+    }
+    assert(update_camera_percent(module,0,15).status==2);
+    assert(update_camera_percent(module,5,15).status==2);
+    assert(update_camera_percent(module,1,101).status==4);
+    assert(update_camera_percent(nullptr,1,15).status==5);
+    assert(update_camera_percent(module,1,15).status==0);
+    *normalizer=512.;
+    assert(update_camera_percent(module,1,20).status==3);
+    restore_camera_scale();assert(*normalizer==512.); // Never undo an outside writer.
+    *normalizer=original;
     // A different camera routine / build is rejected without a data write.
     image[0x8e4fe0] ^= 1;
     assert(!fusion_camera_normalizer(module));
+    assert(update_camera_percent(module,1,20).status==1);
     assert(*normalizer == original);
     image[0x8e4fe0] ^= 1;
     assert(fusion_camera_normalizer(module) == normalizer);
@@ -63,5 +89,5 @@ int main(int argc, char** argv) {
     assert(!fusion_camera_normalizer(module));
     assert(*normalizer == original);
     VirtualFree(image, 0, MEM_RELEASE);
-    std::puts("PASS: actual Fusion camera signature, six floating-point divisions, 20% ratio, adjacent input levels, invalid scales and changed builds");
+    std::puts("PASS: actual Fusion PE, live 1..100% for native bases 1..4, repeated updates, raw-count distinction, restore, invalid/conflicting data and unknown builds");
 }

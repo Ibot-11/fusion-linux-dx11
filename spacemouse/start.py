@@ -14,6 +14,7 @@ import time
 from evdev_input import DEFAULTS, Decoder, HeldMotion, PACKET, transform, axis_state, button_state, discover, settings
 from hidraw_input import Decoder as HidDecoder, MotionWatchdog, discover as discover_hidraw
 from keybindings import button_packet
+from camera_control import CameraControl
 
 ROOT = Path(__file__).resolve().parent
 RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')) / 'autodesk-fusion-spacemouse'
@@ -60,13 +61,14 @@ def main():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     clients = set()
+    camera = CameraControl(ROOT.parent, RUNTIME)
     device = None
     decoder = None
     mode = None
     active_actions = {}
     held = HeldMotion()  # Explicit fallback only; HID reports are never repeated.
     watchdog = MotionWatchdog()
-    state = {'connected': False, 'device': None, 'input_backend': None,
+    state = {'app': str(ROOT.parent.resolve()), 'connected': False, 'device': None, 'input_backend': None,
              'axes': [0]*6, 'raw': [0]*6, 'buttons': [False, False],
              'clients': 0, 'error': None, 'warning': None, 'samples': 0,
              'motion_watchdog': False, 'telemetry': {}}
@@ -76,18 +78,22 @@ def main():
     def drop(client):
         selector.unregister(client)
         clients.discard(client)
+        camera.remove(client)
         client.close()
+
+    def send(client, packet):
+        try:
+            if client.send(packet) != len(packet):
+                drop(client)
+        except (BlockingIOError, OSError):
+            drop(client)
 
     def broadcast(packet):
         if packet is None:
             return
         for client in list(clients):
-            try:
-                # Forward each complete report immediately; no queue/batch.
-                if client.send(packet) != len(packet):
-                    drop(client)
-            except (BlockingIOError, OSError):
-                drop(client)
+            # Forward each complete report immediately; no queue/batch.
+            send(client, packet)
 
     def release():
         held.update([0]*6, 0, time.monotonic())
@@ -140,6 +146,7 @@ def main():
         notify('READY=1\nSTATUS=Direct HID bridge ready; waiting for a device')
         while not stopping:
             now = time.monotonic()
+            camera.tick(send, now)
             if now - last_config > 1:
                 last_config = now
                 try:
@@ -206,9 +213,15 @@ def main():
                     client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     client.setblocking(False)
                     clients.add(client)
+                    camera.add(client)
                     selector.register(client, selectors.EVENT_READ, 'client')
                 elif key.data == 'client':
-                    drop(key.fileobj)
+                    try:
+                        data = key.fileobj.recv(4096)
+                        if not data or not camera.receive(key.fileobj, data):
+                            drop(key.fileobj)
+                    except (BlockingIOError, OSError):
+                        drop(key.fileobj)
                 else:
                     try:
                         # hidraw returns one complete report per read. A large
@@ -234,6 +247,7 @@ def main():
             if now - last_status >= .1:
                 last_status = now
                 state['clients'] = len(clients)
+                state['camera_live'] = camera.status()
                 write_status(state)
         return 0
     except (OSError, ValueError) as error:
@@ -248,6 +262,7 @@ def main():
         server.close()
         selector.close()
         state.update(connected=False, clients=0, error='Bridge stopped')
+        state['camera_live'] = camera.status()
         write_status(state)
         lock.close()
 

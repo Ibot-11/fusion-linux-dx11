@@ -19,6 +19,7 @@ sys.path.insert(0, str(SPACE))
 from processes import fusion_running
 from evdev_input import DEFAULTS, discover, settings
 from camera_gain import percentage_settings
+from camera_control import selected_status, runtime_dir
 from hidraw_input import discover as discover_hidraw
 
 
@@ -183,6 +184,10 @@ def status(app, repo):
                     'evdev_readable': any(d['readable'] for d in evdev_devices),
                     'requires_setup': bool(hid_devices) and not any(d['readable'] for d in hid_devices),
                     'pkexec_available': bool(shutil.which('pkexec')), 'helper_available': access_helper().is_file()}
+    camera = read_json(app / 'spacemouse/camera-gain.json', {'percent': 25})
+    if not isinstance(camera, dict):
+        camera = {'percent': 25}
+        error = 'Invalid saved camera configuration.'
     return {'app': str(app), 'exists': app.is_dir(), 'integration_exists': (app / 'launch.sh').is_file(), 'prefix': prefix, 'prefixes': prefixes,
             'proton': read(app / 'proton-version', 'Proton - Experimental'),
             'proton_path': read(app / 'proton-path'), 'protons': protons, 'steam': steam,
@@ -191,7 +196,7 @@ def status(app, repo):
             'repo': repository(repo), 'spacemouse_enabled': (app / 'spacemouse-enabled').exists(),
             'spacemouse_installed': (app / 'spacemouse/start.py').is_file(),
             'devices': hid_devices + evdev_devices, 'input_access': input_access, 'driver': driver, 'direct_driver': direct_integration(app), 'device_config': device_config,
-            'camera': read_json(app / 'spacemouse/camera-gain.json', {'percent': 25}), 'error': error}
+            'camera': camera, 'camera_live': selected_status(app, driver, camera.get('percent')), 'error': error}
 
 
 def run(command):
@@ -276,7 +281,18 @@ def action(args, app, repo):
     elif name == 'camera':
         value = percentage_settings(args.percent)
         atomic(app / 'spacemouse/camera-gain.json', json.dumps(value, indent=2) + '\n')
-        print('Camera speed saved. Applies when Fusion next starts.', flush=True)
+        live = None
+        if fusion_running():
+            until = time.monotonic() + 1.8
+            while True:
+                live = selected_status(app, read_json(runtime_dir() / 'status.json'), args.percent)
+                if live['state'] in ('live', 'unsupported') or time.monotonic() >= until:
+                    break
+                time.sleep(.05)
+        if live and live['state'] == 'live':
+            print(f'Camera speed applied and confirmed: {live["percent"]}%.', flush=True)
+        else:
+            print('Camera speed saved for the next launch.' + (' ' + live['reason'] if live else ''), flush=True)
     elif name in ('enable', 'disable'):
         closed()
         if not direct_integration(app):

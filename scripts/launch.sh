@@ -26,14 +26,17 @@ if [[ -f "$APP_DIR/logs/fusion.log" && $(stat -c%s "$APP_DIR/logs/fusion.log" 2>
   mv "$APP_DIR/logs/fusion.log" "$APP_DIR/logs/fusion.log.old"
 fi
 
+unset FUSION_SPACEMOUSE_CAMERA_SCALE FUSION_SPACEMOUSE_CAMERA_BASE FUSION_SPACEMOUSE_CAMERA_SESSION
 if [[ -f "$APP_DIR/spacemouse-enabled" ]]; then
   if [[ -f "$APP_DIR/spacemouse/camera_gain.py" ]]; then
-    if ! python3 "$APP_DIR/spacemouse/camera_gain.py" --apply >> "$APP_DIR/logs/spacemouse-start.log" 2>&1; then
-      kdialog --passivepopup 'Could not apply SpaceMouse camera speed. See the Fusion log.' 10 || true
-    elif fusion_camera_scale="$(python3 "$APP_DIR/spacemouse/camera_gain.py" --runtime-scale)"; then
+    if fusion_camera_session="$(python3 "$APP_DIR/spacemouse/camera_gain.py" --prepare-session 2>> "$APP_DIR/logs/spacemouse-start.log")"; then
+      read -r fusion_camera_scale fusion_camera_base fusion_camera_token <<< "$fusion_camera_session"
       export FUSION_SPACEMOUSE_CAMERA_SCALE="$fusion_camera_scale"
+      export FUSION_SPACEMOUSE_CAMERA_BASE="$fusion_camera_base"
+      export FUSION_SPACEMOUSE_CAMERA_SESSION="$fusion_camera_token"
     else
-      kdialog --passivepopup 'Could not read the additional SpaceMouse camera factor.' 10 || true
+      kdialog --passivepopup 'Could not apply SpaceMouse camera speed. See the Fusion log.' 10 || true
+      exit 1
     fi
   fi
   if ! python3 "$APP_DIR/spacemouse/install-sdk.py" "$FUSION" >> "$APP_DIR/logs/spacemouse-start.log" 2>&1 ||

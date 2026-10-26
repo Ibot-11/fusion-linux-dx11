@@ -45,8 +45,9 @@ Fusion itself continues to use its own updater. Applying the current checkout
 installs the local integration without fetching Git updates.
 
 An active Fusion session blocks installation, integration updates, SDK changes
-and profile changes. Device settings can be saved during a session; camera speed
-is queued for the next Fusion start. No Fusion process is terminated by the
+and profile changes. Device settings can be saved during a session. Camera speed
+updates a supported running Fusion session and is also saved for future starts.
+If live control is unavailable, the saved speed applies at the next start. No Fusion process is terminated by the
 manager. Only one manager operation per user runs at a time, and closing the
 window cannot interrupt an active install or update.
 
@@ -83,7 +84,22 @@ Keyboard actions apply while Fusion has focus. Shared modifiers remain held
 until both assigned buttons release them. Focus loss, disconnect and shutdown
 release held keys. Printable characters follow Fusion's Windows keyboard layout;
 characters unavailable in that layout are rejected. Existing button assignments
-survive updates.
+survive updates; their current keys appear without action presets.
+
+## Camera speed
+
+Set **Camera speed** and choose **Apply**. **Live · 20 %**, for example, confirms
+the speed reported by the active Fusion session. The saved value is also used at
+future starts. One speed setting covers both uses.
+
+Live control uses the existing floating-point camera normalizer, with the full
+routine signature checked for Fusion 2705.1.30. It preserves integer input
+counts and accounts for the native gains fixed at session startup. The Manager
+accepts confirmation only from the selected installation and launch session.
+An unavailable, old or unsupported bridge shows **Saved for next launch** or
+**Next launch · live unavailable**; the tooltip explains why. A running session's
+XML preferences remain unchanged. Unknown Fusion builds retain the portable
+native speed steps described in the SpaceMouse documentation.
 
 ## Status and diagnostics
 

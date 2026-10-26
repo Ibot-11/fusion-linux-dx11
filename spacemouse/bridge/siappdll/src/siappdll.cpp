@@ -126,7 +126,6 @@ HANDLE stop_event = NULL;
 
 void clear_context(void)
 {
-    restore_camera_scale();
     if (stop_event) SetEvent(stop_event);
     if (hRcvThread) {
         // Bounded connect/select waits; never kill a thread owning the queue.
@@ -134,6 +133,7 @@ void clear_context(void)
         CloseHandle(hRcvThread);
         hRcvThread = NULL;
     }
+    restore_camera_scale(); // Receiver can no longer race a live normalizer write.
     if (stop_event) { CloseHandle(stop_event); stop_event = NULL; }
     m_queue.clear();
     tgt_wndw = NULL;
@@ -228,6 +228,13 @@ DWORD WINAPI RcvThreadFunction(LPVOID)
             continue;
         }
         LOG(INFO) << "Fusion input bridge connected";
+        DWORD send_timeout = 200;
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&send_timeout, sizeof(send_timeout));
+        int hello[8] = {};
+        if (camera_protocol_hello(hello) && send(fd,(const char*)hello,sizeof(hello),0)!=sizeof(hello)) {
+            sock_close(fd);
+            continue;
+        }
         unsigned long button_state = 0;
         char packet[8 * sizeof(int)];
         size_t packet_used = 0;
@@ -249,7 +256,13 @@ DWORD WINAPI RcvThreadFunction(LPVOID)
             memcpy(buf, packet, sizeof(buf));
             packet_used = 0;
             motion_t m = {};
-            if (buf[0] == 0) {
+            if (buf[0] == 6) {
+                int reply[8] = {};
+                // Camera control is intentionally independent of foreground
+                // focus: the manager owns focus while Apply is clicked.
+                if (camera_protocol_reply(buf,reply) &&
+                    send(fd,(const char*)reply,sizeof(reply),0)!=sizeof(reply)) break;
+            } else if (buf[0] == 0) {
                 bool moving = false;
                 for (int i = 0; i < 7; ++i) {
                     m.data[i] = buf[i + 1];
@@ -342,6 +355,7 @@ enum SpwRetVal SPWAPI SiInitialize(void)
 
     stop_event = CreateEvent(NULL, TRUE, FALSE, NULL);
     if (!stop_event) goto err;
+    apply_camera_scale();
 
 	hRcvThread = CreateThread(
 		NULL,                   // default security attributes
@@ -358,7 +372,6 @@ enum SpwRetVal SPWAPI SiInitialize(void)
 	}
 
 	initialised = true;
-	apply_camera_scale();
 
 	return SPW_NO_ERROR;
 

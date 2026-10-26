@@ -137,8 +137,8 @@ the DLL; a SHA-256-verified x86_64 build is supplied. The tested device is
 Open **Fusion Manager → SpaceMouse** for live axes, button bindings and camera
 speed. Default deadzone is 0; left/right default to ESC/I and act only while
 Fusion has focus. The per-user service opens the real input device using the
-desktop session's permissions. Missing raw access is shown as **Rohzugriff einrichten**.
-The explicit **Gerätezugriff einrichten** action uses pkexec with a fixed helper
+desktop session's permissions. Missing raw access is shown as **Raw device access required**.
+The explicit **Set up access** action uses pkexec with a fixed helper
 to add an identity-restricted uaccess rule; reconnect the receiver afterwards.
 No world-writable device rule or root daemon is installed. The fallback cuts off
 a held state after 250 ms without ABS changes, so full native holding requires HID.
@@ -153,6 +153,9 @@ The portable camera default is 25%; existing settings are kept, including the
 tested 20% setting. Speeds between the native steps use a floating-point extension
 verified for Fusion **2705.1.30**. Other builds retain native 25/50/75/100% steps;
 see [SpaceMouse details](spacemouse/README.md) for compatibility and diagnostics.
+**Apply** also updates a supported running Fusion session, with **Live** shown
+after confirmation. The same value is saved for future starts. Button mappings
+use **Record shortcut…** for individual keys or combinations.
 Axis input integers are forwarded without sensitivity reduction or extra batching.
 Modern 3DxWare radial menus and full application profiles are not implemented.
 

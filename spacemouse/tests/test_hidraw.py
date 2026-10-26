@@ -119,6 +119,48 @@ def run_hid_driver(reader,writer,root,runtime,port):
 
 
 class HidDaemonTests(unittest.TestCase):
+    def test_camera_ack_traffic_never_renews_hid_motion_watchdog(self):
+        from camera_control import create_session
+        from camera_gain import percentage_settings
+        with tempfile.TemporaryDirectory() as tmp:
+            app=Path(tmp)/'app';root=app/'spacemouse';root.mkdir(parents=True)
+            runtime=Path(tmp)/'runtime';record=create_session(app,1,15,runtime)
+            (root/'device.json').write_text(json.dumps(dict(DEFAULTS)))
+            (root/'camera-gain.json').write_text(json.dumps(percentage_settings(15)))
+            reader,writer=socket.socketpair(socket.AF_UNIX,socket.SOCK_SEQPACKET)
+            with socket.socket() as reserve:reserve.bind(('127.0.0.1',0));port=reserve.getsockname()[1]
+            child=multiprocessing.get_context('fork').Process(target=run_hid_driver,args=(reader.fileno(),writer.fileno(),str(root),str(runtime),port))
+            child.start();reader.close();client=socket.socket();client.settimeout(.03)
+            try:
+                deadline=time.monotonic()+3
+                while True:
+                    try:client.connect(('127.0.0.1',port));break
+                    except (ConnectionRefusedError,ConnectionAbortedError):
+                        if time.monotonic()>deadline:raise
+                        time.sleep(.01)
+                client.sendall(PACKET.pack(5,1,*struct.unpack('<4i',bytes.fromhex(record['token'])),1,123))
+                writer.send(motion([1,0,0,0,0,0]))
+                start=time.monotonic();buffer=b'';acks=0;neutral=None;last_target=0
+                while time.monotonic()-start<.45:
+                    elapsed=time.monotonic()-start;target=15+int(elapsed/.06)
+                    if target!=last_target:
+                        (root/'camera-gain.json').write_text(json.dumps(percentage_settings(target)));last_target=target
+                    try:buffer+=client.recv(4096)
+                    except socket.timeout:continue
+                    while len(buffer)>=PACKET.size:
+                        packet=PACKET.unpack(buffer[:PACKET.size]);buffer=buffer[PACKET.size:]
+                        if packet[0]==6:
+                            client.sendall(PACKET.pack(7,*packet[1:6],0,packet[6]));acks+=1
+                        elif packet[0]==0 and packet[1:7]==(0,)*6:
+                            neutral=time.monotonic()-start
+                self.assertGreaterEqual(acks,2)
+                self.assertIsNotNone(neutral);self.assertLess(neutral,.4)
+                self.assertTrue(json.loads((runtime/'status.json').read_text())['motion_watchdog'])
+            finally:
+                writer.close();client.close();child.terminate();child.join(3)
+                if child.is_alive():child.kill();child.join()
+            self.assertEqual(child.exitcode,0)
+
     def test_real_hid_report_boundaries_tcp_no_repeat_watchdog_metadata_and_usb_disconnect(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);(root/'device.json').write_text(json.dumps(dict(DEFAULTS)))
