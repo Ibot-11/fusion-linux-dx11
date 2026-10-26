@@ -8,6 +8,10 @@ out of the main controls.
 Requires Qt 6 Widgets, a C++17 compiler, make/pkg-config and Python 3 (stdlib only).
 There is no web server, Electron runtime or permanent root service.
 
+The Manager has its own icon for the application menu, window and sidebar.
+Its vector source is `desktop/fusion-manager.svg`; the matching PNG is embedded
+in the executable and installed separately from Fusion's icon.
+
 ```sh
 make -C manager
 ./manager/run.sh

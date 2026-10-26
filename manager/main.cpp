@@ -666,7 +666,8 @@ class Manager : public QMainWindow {
         deadzone->setObjectName("deadzone");
         deadzone->setRange(0, 100);
         deadzone->setSuffix(" counts");
-        deadzone->setFixedWidth(108);
+        deadzone->setFixedWidth(120);
+        deadzone->setAlignment(Qt::AlignCenter);
         deadzoneRow->addWidget(label("Deadzone", "muted"));
         deadzoneRow->addStretch();
         deadzoneRow->addWidget(deadzone);
@@ -711,7 +712,8 @@ class Manager : public QMainWindow {
         camera->setObjectName("camera");
         camera->setRange(1, 100);
         camera->setSuffix(" %");
-        camera->setFixedWidth(88);
+        camera->setFixedWidth(100);
+        camera->setAlignment(Qt::AlignCenter);
         cameraRow->addWidget(label("Camera speed"));
         cameraRow->addStretch();
         cameraRow->addWidget(camera);
@@ -915,9 +917,10 @@ class Manager : public QMainWindow {
         railLayout->setSpacing(18);
         auto *brand = new QHBoxLayout;
         brand->setSpacing(10);
-        auto *mark = label("F", "brandMark");
+        auto *mark = label("");
+        mark->setPixmap(QIcon(":/manager/icon.png").pixmap(32, 32));
         mark->setAlignment(Qt::AlignCenter);
-        mark->setFixedSize(30, 32);
+        mark->setFixedSize(32, 32);
         brand->addWidget(mark);
         brand->addWidget(label("Fusion\nManager", "brand"));
         brand->addStretch();
@@ -1035,6 +1038,8 @@ int main(int argc, char **argv) {
     QApplication app(argc, argv);
     app.setApplicationName("Fusion Manager");
     app.setOrganizationName("fusion-linux-dx11");
+    app.setDesktopFileName("fusion-manager");
+    app.setWindowIcon(QIcon(":/manager/icon.png"));
     QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
     QCommandLineParser parser;
     parser.setApplicationDescription("Native Fusion and SpaceMouse manager for Linux");
@@ -1088,7 +1093,6 @@ int main(int argc, char **argv) {
         QLabel[kind="badge"][tone="good"] { background:#263f3d; color:#a9d5be; }
         QLabel[kind="fusionMark"] { background:#df7932; color:#fff3e8; font-size:27px; font-weight:700; border-radius:6px; }
         #rail { background:#19212d; border-right:1px solid #313d4f; }
-        QLabel[kind="brandMark"] { color:#f29248; font-size:30px; font-weight:700; }
         QLabel[kind="brand"] { color:#e7edf5; font-size:15px; font-weight:600; }
         QLabel[kind="railnote"] { color:#748399; font-size:11px; padding-left:10px; }
         #navigation { background:transparent; outline:0; border:0; }
@@ -1110,6 +1114,12 @@ int main(int argc, char **argv) {
         QToolButton#disclosure { color:#a2b3ca; font-size:12px; }
         QLineEdit, QComboBox, QSpinBox { background:#1c2736; border:1px solid #526179; border-radius:4px; padding:6px 8px; min-height:20px; selection-background-color:#397fbf; }
         QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border-color:#70a4d2; }
+        QSpinBox { padding-right:22px; }
+        QSpinBox::up-button { subcontrol-origin:border; subcontrol-position:top right; width:20px; background:#29394d; border-left:1px solid #526179; border-bottom:1px solid #526179; border-top-right-radius:3px; }
+        QSpinBox::down-button { subcontrol-origin:border; subcontrol-position:bottom right; width:20px; background:#29394d; border-left:1px solid #526179; border-bottom-right-radius:3px; }
+        QSpinBox::up-button:hover, QSpinBox::down-button:hover { background:#40526c; }
+        QSpinBox::up-arrow { image:url(:/manager/up.xpm); width:8px; height:5px; }
+        QSpinBox::down-arrow { image:url(:/manager/down.xpm); width:8px; height:5px; }
         QComboBox QAbstractItemView { background:#263448; color:#e1e7ef; selection-background-color:#3d628c; border:1px solid #53647c; outline:0; }
         QCheckBox { spacing:8px; }
         QCheckBox::indicator { width:15px; height:15px; }

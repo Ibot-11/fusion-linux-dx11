@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/manager">
+    <file alias="icon.png">../desktop/fusion-manager.png</file>
+    <file alias="up.xpm">icons/up.xpm</file>
+    <file alias="down.xpm">icons/down.xpm</file>
+  </qresource>
+</RCC>

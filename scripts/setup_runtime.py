@@ -138,9 +138,10 @@ def deploy_desktop(app):
         atomic_write(apps / (name + ".desktop"), text.encode(), 0o755)
     atomic_write(apps / "autodesk-fusion-update.desktop", desktop_entry(app, "update.py", "Update Fusion", "Update the Linux integration from its Git repository", True), 0o755)
     copy_file(REPO / "desktop/autodesk-fusion.png", data / "icons/hicolor/256x256/apps/autodesk-fusion.png")
+    copy_file(REPO / "desktop/fusion-manager.png", data / "icons/hicolor/256x256/apps/fusion-manager.png")
     local_bin = Path.home() / ".local/bin"
     local_bin.mkdir(parents=True, exist_ok=True)
-    atomic_write(apps / "fusion-manager.desktop", desktop_entry(app, "manager.sh", "Fusion Manager", "Manage Fusion, updates and SpaceMouse"), 0o755)
+    atomic_write(apps / "fusion-manager.desktop", desktop_entry(app, "manager.sh", "Fusion Manager", "Manage Fusion, updates and SpaceMouse", icon="fusion-manager"), 0o755)
     (apps / "fusion-spacemouse.desktop").unlink(missing_ok=True)
     for name, destination in (("autodesk-fusion", "launch.sh"), ("autodesk-fusion-update", "update.py"), ("fusion-manager", "manager.sh")):
         link = local_bin / name
