@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Autodesk Fusion Anmeldung
+Name=Autodesk Fusion Sign In
 Exec=@APP_DIR@/callback.py %u
 Type=Application
 NoDisplay=true

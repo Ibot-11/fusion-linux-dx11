@@ -19,27 +19,27 @@ def git(repo, *args):
 def pull_checkout(repo):
     repo = Path(repo).resolve()
     if git(repo, "status", "--porcelain", "--untracked-files=normal"):
-        raise ValueError("Das Repo enthält lokale Änderungen. Bitte zuerst committen oder selbst sichern; der Updater überschreibt sie nicht.")
+        raise ValueError("The repository has local changes. Commit or back them up before updating.")
     if git(repo, "rev-parse", "--is-shallow-repository") not in ("true", "false"):
-        raise ValueError("Kein gültiges Git-Repository")
+        raise ValueError("Invalid Git repository")
     branch = git(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
     upstream = git(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
     remote = git(repo, "config", f"branch.{branch}.remote")
     if remote == "." or not remote:
-        raise ValueError("Für diesen Branch ist kein entferntes Update-Ziel eingerichtet.")
+        raise ValueError("No remote update source is configured for this branch.")
     old = git(repo, "rev-parse", "HEAD")
     subprocess.run(["git", "-C", str(repo), "fetch", "--prune", remote], check=True)
     # Never reset, stash, change branches, or manufacture a merge commit.
     subprocess.run(["git", "-C", str(repo), "merge", "--ff-only", "--no-edit", upstream], check=True)
     new = git(repo, "rev-parse", "HEAD")
-    print(f"Repo-Stand: {old[:12]} → {new[:12]}", flush=True)
+    print(f"Revision: {old[:12]} → {new[:12]}", flush=True)
     return repo
 
 
 def checkout_for_installation(app):
     state_file = app / "repo-state.json"
     if not state_file.exists():
-        raise ValueError("Noch keine Repo-Zuordnung vorhanden. Bitte im geklonten Repo ./install.sh --update INSTALLATIONSORDNER ausführen.")
+        raise ValueError("No source repository is linked. Run ./install.sh --update INSTALLATION_FOLDER from a cloned repository.")
     state = json.loads(state_file.read_text())
     source = Path(state["checkout"]) if state.get("checkout") else None
     if source and (source / ".git").exists():
@@ -64,10 +64,10 @@ def main():
     result = 1
     try:
         if fusion_running():
-            raise ValueError("Bitte Fusion vor dem Aktualisieren vollständig schließen.")
+            raise ValueError("Close Fusion before updating.")
         target = args.target.expanduser().resolve()
         if not target.is_dir():
-            raise ValueError("Die zu aktualisierende Installation existiert nicht.")
+            raise ValueError("The installation to update does not exist.")
         repo = pull_checkout(args.repo or checkout_for_installation(target))
         command = ["bash", str(repo / "install.sh"), "--apply-update", str(target)]
         if args.with_spacemouse:
@@ -76,9 +76,9 @@ def main():
             command.append("--without-spacemouse")
         result = subprocess.run(command).returncode
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
-        print(f"Update abgebrochen: {error}", file=sys.stderr)
+        print(f"Update stopped: {error}", file=sys.stderr)
     if args.interactive and sys.stdin.isatty():
-        input("Zum Schließen Enter drücken …")
+        input("Press Enter to close …")
     return result
 
 

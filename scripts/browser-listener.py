@@ -24,7 +24,7 @@ while running:
                 with logfile.open('a') as log:
                     stamp = datetime.datetime.now().isoformat(timespec='seconds')
                     host = urllib.parse.urlsplit(url).hostname
-                    log.write(f'{stamp} Browser-Anfrage für {host}\n')
+                    log.write(f'{stamp} Browser request for {host}\n')
                     log.flush()
                     subprocess.Popen(['/usr/bin/firefox', '--new-window', url],
                                      env=browser_env, stdout=subprocess.DEVNULL,
@@ -34,5 +34,5 @@ while running:
                 request.rename(request.with_suffix('.unsupported'))
         except OSError as error:
             with logfile.open('a') as log:
-                log.write(f'Browser-Übergabe fehlgeschlagen: {type(error).__name__}\n')
+                log.write(f'Browser handoff failed: {type(error).__name__}\n')
     time.sleep(0.25)

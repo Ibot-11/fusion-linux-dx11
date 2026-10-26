@@ -51,7 +51,7 @@ def read_json(path, default=None):
 
 def valid_prefix(value):
     if not value or Path(value).name != value or value in ('.', '..'):
-        raise ValueError('Das Prefix muss ein einzelner Ordnername sein.')
+        raise ValueError('The prefix must be a single folder name.')
     return value
 
 
@@ -143,17 +143,17 @@ def access_helper():
 def setup_device_access():
     pkexec = shutil.which('pkexec')
     if not pkexec:
-        raise ValueError('pkexec fehlt. Bitte das Polkit-Paket deiner Distribution installieren; Gerätezugriff wurde nicht verändert.')
+        raise ValueError('pkexec is missing. Install Polkit to set up device access.')
     helper = access_helper()
     if not helper.is_file() or not os.access(helper, os.X_OK):
-        raise ValueError('Der feste Gerätezugriffshelfer fehlt. Bitte den Manager mit make -C manager bauen bzw. die Integration aktualisieren.')
-    print('Für den Universal Receiver 256f:c652 wird eine feste uaccess-Regel angelegt. Die Administratorfreigabe erfolgt über Polkit.', flush=True)
+        raise ValueError('The device-access helper is missing. Build the manager or update the integration.')
+    print('Setting up device access for the Universal Receiver. Polkit will request administrator approval.', flush=True)
     result = subprocess.run([pkexec, str(helper)])
     if result.returncode in (126, 127):
-        raise ValueError('Gerätezugriff nicht eingerichtet: Administratorfreigabe wurde abgebrochen oder nicht erteilt.')
+        raise ValueError('Device access was not set up: administrator approval was cancelled or denied.')
     if result.returncode != 0:
-        raise ValueError('Gerätezugriff konnte nicht eingerichtet werden. Die genaue Meldung des festen Helfers steht oben.')
-    print('Jetzt den Universal Receiver abziehen und neu anschließen. Es wird kein Dienst neu gestartet.', flush=True)
+        raise ValueError('Device access setup failed. See the helper message above.')
+    print('Unplug and reconnect the Universal Receiver to apply device access.', flush=True)
 
 
 def status(app, repo):
@@ -195,13 +195,13 @@ def status(app, repo):
 
 
 def run(command):
-    print('Starte: ' + ' '.join(str(x) for x in command), flush=True)
+    print('Running: ' + ' '.join(str(x) for x in command), flush=True)
     subprocess.run([str(x) for x in command], check=True)
 
 
 def closed():
     if fusion_running():
-        raise ValueError('Bitte Fusion vollständig schließen. Es werden keine Prozesse beendet.')
+        raise ValueError('Close Fusion before continuing.')
 
 
 def action(args, app, repo):
@@ -212,23 +212,23 @@ def action(args, app, repo):
         state = read_json(app / 'repo-state.json')
         destination = repo or app / 'update-source'
         if destination.exists() and any(destination.iterdir()):
-            raise ValueError('Der Zielordner enthält bereits Dateien; nichts wird überschrieben.')
+            raise ValueError('The destination folder is not empty. Choose an empty folder.')
         destination.parent.mkdir(parents=True, exist_ok=True)
         run(['git', 'clone', '--branch', state.get('branch', 'main'), '--single-branch', '--',
              state.get('remote', 'https://github.com/Ibot-11/fusion-linux-dx11.git'), destination])
-        print('Checkout bereit: ' + str(destination), flush=True)
+        print('Checkout ready: ' + str(destination), flush=True)
     elif name == 'check':
         if not repo:
-            raise ValueError('Kein Repository gewählt.')
+            raise ValueError('Select a repository.')
         branch = git(repo, 'symbolic-ref', '--quiet', '--short', 'HEAD')
         remote = git(repo, 'config', f'branch.{branch}.remote')
         if not remote or remote == '.':
-            raise ValueError('Kein entferntes Update-Ziel konfiguriert.')
+            raise ValueError('No remote update source is configured.')
         run(['git', '-C', repo, 'fetch', '--prune', remote])
     elif name in ('install', 'patch', 'apply', 'update'):
         closed()
         if not repo or not (repo / 'install.sh').is_file():
-            raise ValueError('Bitte den lokalen fusion-linux-dx11-Checkout auswählen.')
+            raise ValueError('Select the local fusion-linux-dx11 checkout.')
         mode = {'install': '--clean', 'patch': '--patch', 'apply': '--apply-update', 'update': '--update'}[name]
         command = ['bash', repo / 'install.sh', mode, app]
         if name != 'update':
@@ -242,29 +242,29 @@ def action(args, app, repo):
         run(command)
     elif name == 'launch':
         if fusion_running():
-            raise ValueError('Fusion läuft bereits.')
+            raise ValueError('Fusion is already running.')
         if not (app / 'launch.sh').is_file():
-            raise ValueError('Linux-Integration fehlt. Bitte zuerst installieren/einrichten.')
+            raise ValueError('The Linux integration is missing. Set it up first.')
         (app / 'logs').mkdir(exist_ok=True)
         with (app / 'logs/manager-launch.log').open('ab') as log:
             subprocess.Popen([str(app / 'launch.sh')], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-        print('Fusion-Start angefordert; Details in logs/manager-launch.log.', flush=True)
+        print('Starting Fusion. Log: logs/manager-launch.log.', flush=True)
     elif name == 'profile':
         closed()
         prefix = valid_prefix(args.prefix or read(app / 'prefix-dir', 'compatdata-exp-dx11'))
         if not (app / prefix / 'pfx').is_dir():
-            raise ValueError('Dieses Wine-Prefix existiert nicht.')
+            raise ValueError('The selected Wine prefix does not exist.')
         proton = Path(args.proton or '').expanduser().resolve()
         if not (proton / 'proton').is_file():
-            raise ValueError('Bitte einen installierten Proton-Ordner auswählen.')
+            raise ValueError('Select an installed Proton folder.')
         atomic(app / 'prefix-dir', prefix + '\n')
         atomic(app / 'proton-version', proton.name + '\n')
         atomic(app / 'proton-path', str(proton) + '\n')
-        print('Prefix und Proton gespeichert.', flush=True)
+        print('Prefix and Proton saved.', flush=True)
     elif name == 'settings':
         value = json.loads(args.settings)
         if not isinstance(value, dict):
-            raise ValueError('Ungültige Geräteeinstellungen.')
+            raise ValueError('Invalid device settings.')
         # Validate before touching the persistent configuration.
         import tempfile
         with tempfile.TemporaryDirectory() as temp:
@@ -272,25 +272,27 @@ def action(args, app, repo):
             path.write_text(json.dumps(value))
             value = settings(path)
         atomic(app / 'spacemouse/device.json', json.dumps(value, indent=2) + '\n')
-        print('Achsen und Tasten gespeichert; Brücke übernimmt sie innerhalb einer Sekunde.', flush=True)
+        print('Axes and buttons saved.', flush=True)
     elif name == 'camera':
         value = percentage_settings(args.percent)
         atomic(app / 'spacemouse/camera-gain.json', json.dumps(value, indent=2) + '\n')
-        print('Kamerageschwindigkeit vorgemerkt; wirksam beim nächsten Fusion-Start.', flush=True)
+        print('Camera speed saved. Applies when Fusion next starts.', flush=True)
     elif name in ('enable', 'disable'):
         closed()
         if not direct_integration(app):
-            raise ValueError('Bitte zuerst den aktuellen Checkout anwenden. Die alte Treiberintegration wird aus dieser Oberfläche nicht gestartet oder verändert.')
+            raise ValueError('Apply the current checkout before managing the driver.')
         run([sys.executable, app / 'spacemouse/control.py', name])
     elif name in ('driver-start', 'driver-stop'):
         if not direct_integration(app):
-            raise ValueError('Bitte zuerst den aktuellen Checkout anwenden. Der vorhandene alte Treiberdienst bleibt unverändert.')
+            raise ValueError('Apply the current checkout before managing the driver.')
         run(['systemctl', '--user', 'start' if name == 'driver-start' else 'stop', 'fusion-spacemouse.service'])
     else:
-        raise ValueError('Unbekannte Aktion: ' + name)
+        raise ValueError('Unknown action: ' + name)
 
 
 def main():
+    # Keep tool output in the same language as the manager.
+    os.environ['LC_MESSAGES'] = 'C'
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--target', type=Path, default=Path(os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local/share'))) / 'autodesk-fusion')
     parser.add_argument('--repo', type=Path)
@@ -318,11 +320,11 @@ def main():
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
-                    raise ValueError('Eine andere Manager-Aktion läuft bereits.')
+                    raise ValueError('Another manager operation is in progress.')
                 action(args, app, repo)
         return 0
     except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
-        print('Aktion fehlgeschlagen: ' + str(error), file=sys.stderr, flush=True)
+        print('Action failed: ' + str(error), file=sys.stderr, flush=True)
         return 1
 
 

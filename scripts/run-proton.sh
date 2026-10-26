@@ -26,7 +26,7 @@ for d in "${STEAM_SEARCH_DIRS[@]}"; do
 done
 
 if [[ -z "$STEAM_DIR" ]]; then
-  echo "Fehler: Steam-Verzeichnis konnte nicht gefunden werden." >&2
+  echo "Error: Steam folder not found." >&2
   exit 1
 fi
 
@@ -76,8 +76,8 @@ elif [[ -d "/usr/share/steam/compatibilitytools.d/$PROTON_VERSION" ]]; then
 fi
 
 if [[ -z "$PROTON_DIR" ]]; then
-  echo "Fehler: Proton-Version '$PROTON_VERSION' nicht gefunden!" >&2
-  echo "Bitte stelle sicher, dass Steam und '$PROTON_VERSION' installiert sind." >&2
+  echo "Error: Proton version '$PROTON_VERSION' not found." >&2
+  echo "Make sure Steam and '$PROTON_VERSION' are installed." >&2
   exit 1
 fi
 

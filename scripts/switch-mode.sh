@@ -36,7 +36,7 @@ stop_prefix_wineserver() {
 case "${1:-status}" in
   exp-dx11|experimental|dx11)
     if pgrep -fi "Fusion360\.exe" >/dev/null 2>&1; then
-      echo "Bitte zuerst Autodesk Fusion schließen, bevor das Profil gewechselt wird." >&2
+      echo "Close Autodesk Fusion before switching profiles." >&2
       exit 1
     fi
     stop_prefix_wineserver "compatdata" "GE-Proton11-7-x86_64"
@@ -44,11 +44,11 @@ case "${1:-status}" in
     printf 'compatdata-exp-dx11\n' > "$APP_DIR/prefix-dir"
     printf 'Proton - Experimental\n' > "$APP_DIR/proton-version"
     chmod 600 "$APP_DIR/prefix-dir" "$APP_DIR/proton-version"
-    echo "Aktiviert: Proton - Experimental + DirectX 11 (Prefix: compatdata-exp-dx11)"
+    echo "Enabled: Proton - Experimental + DirectX 11 (Prefix: compatdata-exp-dx11)"
     ;;
   ge-opengl|opengl|stable)
     if pgrep -fi "Fusion360\.exe" >/dev/null 2>&1; then
-      echo "Bitte zuerst Autodesk Fusion schließen, bevor das Profil gewechselt wird." >&2
+      echo "Close Autodesk Fusion before switching profiles." >&2
       exit 1
     fi
     stop_prefix_wineserver "compatdata-exp-dx11" "Proton - Experimental"
@@ -56,14 +56,14 @@ case "${1:-status}" in
     printf 'compatdata\n' > "$APP_DIR/prefix-dir"
     printf 'GE-Proton11-7-x86_64\n' > "$APP_DIR/proton-version"
     chmod 600 "$APP_DIR/prefix-dir" "$APP_DIR/proton-version"
-    echo "Aktiviert: GE-Proton11-7-x86_64 + OpenGL Core Profile (Prefix: compatdata)"
+    echo "Enabled: GE-Proton11-7-x86_64 + OpenGL Core Profile (Prefix: compatdata)"
     ;;
   status)
-    echo "Aktuelles Prefix : $(cat "$APP_DIR/prefix-dir" 2>/dev/null || echo compatdata-exp-dx11)"
-    echo "Aktuelle Proton  : $(cat "$APP_DIR/proton-version" 2>/dev/null || echo Proton - Experimental)"
+    echo "Current prefix : $(cat "$APP_DIR/prefix-dir" 2>/dev/null || echo compatdata-exp-dx11)"
+    echo "Current Proton  : $(cat "$APP_DIR/proton-version" 2>/dev/null || echo Proton - Experimental)"
     ;;
   *)
-    echo "Verwendung: $0 {exp-dx11|ge-opengl|status}" >&2
+    echo "Usage: $0 {exp-dx11|ge-opengl|status}" >&2
     exit 1
     ;;
 esac

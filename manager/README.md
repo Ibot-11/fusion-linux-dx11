@@ -1,114 +1,103 @@
 # Fusion Manager 1.2.0
 
-Die native Linux-Anwendung verwaltet Fusion-Installation, Git-Updates, Prefix,
-Proton, Start, SpaceMouse-Achsen, Tasten und Kamerageschwindigkeit. Sie benötigt
-Qt 6 Widgets, einen C++17-Compiler, make/pkg-config und Python 3 (nur stdlib).
-Es gibt keinen Webserver, Browser-/Electron-Prozess oder separaten root-Dienst.
+A native Linux application for Fusion, repository updates, Proton profiles and
+SpaceMouse settings. The interface is English, with a compact dark theme inspired
+by Fusion. Help buttons and expandable details keep explanations and diagnostics
+out of the main controls.
+
+Requires Qt 6 Widgets, a C++17 compiler, make/pkg-config and Python 3 (stdlib only).
+There is no web server, Electron runtime or permanent root service.
 
 ```sh
 make -C manager
 ./manager/run.sh
-# Anderer Installationsordner:
-./manager/run.sh --target /pfad/zu/autodesk-fusion
+# Select a different installation:
+./manager/run.sh --target /path/to/autodesk-fusion
 ```
 
-Nach `./install.sh --patch` bzw. `--apply-update` stehen der Menüeintrag
-**Fusion Manager** und `fusion-manager` zur Verfügung. Mit **Einrichtung** einen
-Installationsordner und den lokalen Checkout wählen. **Neu installieren** lädt
-bei Bedarf Autodesks offiziellen Installer und startet dessen Setup; dabei
-bleiben Anmeldung und Autodesk-Dialoge sichtbar. Ein bereits belegter
-Installationsordner wird abgewiesen. **Vorhandene Installation einrichten**
-übernimmt eine bestehende Installation; **Aktuellen Checkout anwenden**
-installiert die bereits lokal vorliegende Integration ohne Git-Download.
+After installation, launch **Fusion Manager** from the application menu or run
+`fusion-manager`. The application manages four areas:
 
-**Repository laden** klont einen fehlenden Checkout in den ausgewählten, freien
-Repo-Ordner; eine vorhandene Installation verwendet ihre gespeicherte Quelle und
-ihren Branch. Vorhandene Dateien werden abgewiesen. **Updates prüfen** führt
-nur einen expliziten Git-Fetch aus. Die angezeigten
-Ahead-/Behind-Zahlen beziehen sich auf den letzten Abruf. **Git-Update
-installieren** verwendet den bestehenden Fast-Forward-Updater und führt den
-neu geholten Installer aus. Lokale Dateien werden weder gestasht noch verworfen.
-Updates sichern ersetzte Helfer unter `backups/updates`, erhalten Dokumente,
-aktive Prefix-/Proton-/GPU-/DXVK- und SpaceMouse-Einstellungen. Autodesk Fusion
-selbst verwendet weiterhin seinen eigenen Updater. Eine GUI-Neuinstallation
-installiert weder Steam noch ein Proton-Paket; diese müssen zuvor vorhanden sein.
+- **Overview:** Fusion version, integration version, launch and repository updates.
+- **SpaceMouse:** axes, inversion, button bindings, camera speed and device status.
+- **Setup:** installation location, source checkout, prefix and Proton runtime.
+- **Activity:** operation output and access to log files.
 
-**Laufzeit** wählt einen vorhandenen Prefix-Ordner und einen tatsächlich
-installierten Proton-Ordner. Die Auswahl wird in `prefix-dir`, `proton-version`
-und `proton-path` gespeichert; dadurch funktionieren auch benutzerdefinierte
-Proton-Versionen aus weiteren Steam-Bibliotheken. **Fusion starten** benutzt
-unverändert den produktiven Launcher und schreibt Startfehler nach
-`logs/manager-launch.log`. Eine laufende Fusion-Sitzung verhindert Installation,
-Updates, SDK-Wechsel und Profiländerungen, ohne Prozesse zu beenden.
+## Installation and updates
 
-## Zustandsquellen und Grenzen
+Choose an existing installation or an empty destination in Setup. A new
+installation uses Autodesk's official installer. Steam and a compatible Proton
+runtime must already be installed. Existing installations can be configured or
+updated without reinstalling Fusion.
 
-- Fusion-Version: `fusion_version.txt`, ersatzweise `version.json` neben der
-  tatsächlich gewählten `Fusion360.exe`. Keine erfundene Version bei Fehlen.
-- Installierte Linux-Version/Revision: `repo-state.json`. Bei einer älteren
-  vorhandenen Installation ohne Metadaten wird die Zuordnung als unbekannt gezeigt.
-- Repo: tatsächliche Git-Revision, Branch, Arbeitsverzeichnis und Upstream.
-- SpaceMouse: Linux-sysfs-Geräteidentität, ACL-Lesbarkeit und echter Brückenstatus.
-  Die Live-Anzeige liest nur `status.json` alle 100 ms; ein separater 5-s-Timer
-  aktualisiert Installations-/Git-/Protonstatus. Netzwerkzugriff erfolgt auf Aktion.
-- Kamerawerte werden nur vorgemerkt. Fusion-Präferenzen ändern sich erst bei
-  geschlossenem Fusion vor dem nächsten Start. Unter 25 % gilt die vorhandene
-  Signaturprüfung für unterstützte Fusion-Versionen.
+The source checkout can be cloned into an empty folder. Checking for updates
+performs an explicit Git fetch. Ahead/behind counts reflect the last fetch.
+Installing an update uses a fast-forward only; local edits and divergent history
+block it. The updater does not reset, stash or switch branches.
 
-Für den USB-Universal-Receiver 256f:c652 bevorzugt die Brücke direkte HID-Reports.
-Nur der eng geprüfte 448-Byte-Descriptor wird akzeptiert; weitere Receiver-
-Interfaces werden nicht als Achseneingang gewählt. Fehlende HID-Leserechte zeigt
-sie als **Rohzugriff einrichten**. Der benannte evdev-Fallback ist eingeschränkt:
-Eine konstante Auslenkung wird nach 250 ms ohne ABS-Änderung sicher neutralisiert.
-Er ersetzt damit keine vollständige native Haltebewegung.
+Replaced runtime files are backed up under `backups/updates`. Documents and
+prefix, Proton, GPU, DXVK and SpaceMouse preferences are preserved. Autodesk
+Fusion itself continues to use its own updater. Applying the current checkout
+installs the local integration without fetching Git updates.
 
-**Gerätezugriff einrichten** startet ausschließlich auf ausdrücklichen Klick
-`pkexec` mit einem festen, argumentlosen C++-Helfer. Nach Administratorfreigabe
-kann dieser nur die enge uaccess-Regel
-`/etc/udev/rules.d/70-fusion-spacemouse.rules` für USB 256f:c652 anlegen und die
-udev-Regeln neu laden. Kein MODE=0666, keine wählbaren Root-Pfade/Kommandos und
-kein Root-Dauerdienst. **Empfänger danach abziehen und neu anschließen**; die
-aktive lokale Sitzung bekommt den Gerätezugriff. Ohne pkexec oder bei Abbruch
-bleiben Rechte unverändert. Status/Start/Installation führen diese Aktion nicht
-automatisch aus. Details und Regeltext: [SpaceMouse-Anleitung](../spacemouse/README.md).
+An active Fusion session blocks installation, integration updates, SDK changes
+and profile changes. Device settings can be saved during a session; camera speed
+is queued for the next Fusion start. No Fusion process is terminated by the
+manager. Only one manager operation per user runs at a time, and closing the
+window cannot interrupt an active install or update.
 
-HID-Motionreports werden einzeln und ohne künstliche Wiederholung weitergereicht.
-250 ms ohne weiteren Motionreport bei letzter nichtneutraler Auslenkung lösen
-einmalig Neutral und Tastenfreigabe aus. Batterie-/Vendorstatusreports verlängern
-diese Frist nicht. Daraus wird kein Funkzustand oder echter Hardwaretakt abgeleitet.
-Der reale Hand-/Halte-/Funkverlust-Test steht bis zur erlaubten Geräteprüfung aus.
-Eine alte installierte Treiberintegration wird aus der neuen Oberfläche erst
-bedienbar, nachdem der aktuelle Checkout bei geschlossenem Fusion angewendet wurde.
+## Device access and precision
 
-Nur die lokale Instanz pro Benutzer kann gleichzeitig eine Manager-Aktion
-starten. Ein laufendes Installations-/Updateverfahren kann nicht durch Schließen
-des GUI-Fensters abgebrochen werden; der native Autodesk-Installer bleibt bedienbar.
+The supported Universal Receiver (`256f:c652`, verified 448-byte HID descriptor)
+uses direct HID reports. Native signed counts reach the Wine SDK unchanged;
+camera speed is applied after integer input. The default deadzone is zero.
+Reports are forwarded individually without synthetic repeats. A 250 ms motion
+watchdog sends a neutral state and releases buttons if motion reports stop;
+battery and vendor-status packets do not extend that deadline.
 
-## Reproduzierbare Prüfung
+If HID access is missing, **Set up access** requests administrator approval
+through Polkit. A fixed, argumentless helper creates only
+`/etc/udev/rules.d/70-fusion-spacemouse.rules` for that receiver and reloads udev
+rules. Reconnect the receiver afterward. Access belongs to the active local
+desktop session; no world-writable device permissions or root daemon are used.
+Cancelling approval leaves permissions unchanged.
+
+The explicitly identified evdev fallback is limited: a steady deflection stops
+after 250 ms without an ABS change. Set up direct HID access for held movement.
+Unsupported devices are not treated as a verified motion interface.
+
+## Status and diagnostics
+
+Fusion's version comes from the selected executable's `fusion_version.txt` or
+validated `version.json`. Integration version and revision come from
+`repo-state.json`; missing metadata remains unknown. Repository information comes
+from Git, and device status comes from sysfs, access checks and the local bridge.
+
+Live axes use the bridge's status file at 100 ms intervals. Installation, Git and
+Proton status refresh every five seconds. Network access occurs on explicit
+actions. Launch output is recorded in `logs/manager-launch.log`. Camera settings
+below 25% retain the existing signature check for supported Fusion builds.
+
+## Verification
 
 ```sh
 make -C layer
 make -C manager
 bash spacemouse/build.sh
 python3 -m unittest discover -s tests -v
-python3 -m unittest discover -s spacemouse/tests -p test_evdev.py -v
-python3 -m unittest discover -s spacemouse/tests -p test_hidraw.py -v
-python3 -m unittest discover -s spacemouse/tests -p test_camera_gain.py -v
-python3 -m unittest discover -s spacemouse/tests -p test_processes.py -v
+python3 -m unittest discover -s spacemouse/tests -p 'test_*.py' -v
 QT_QPA_PLATFORM=offscreen ./manager/run.sh --smoke-test --target /tmp/fusion-empty
 QT_QPA_PLATFORM=offscreen ./manager/run.sh --screenshot /tmp/fusion-manager.png
 ```
 
-`--app-dir` ist ein Alias für `--target`. `--page spacemouse` oder `--page setup`
-und `--size 1130x1200` erlauben reproduzierbare Screenshots weiterer Seiten. Screenshot und Smoke-Test sind lesend:
-sie starten weder Fusion noch die Brücke und schreiben keine Installation.
-Die Tests verwenden lokale Git-Repositories, temporäre Installationsordner und
-für den echten Daemon eine Pipe oder einen SOCK_SEQPACKET-Kanal als Eventquelle
-plus einen freien TCP-Testport. Die Rechteaktion wird gemockt; es wird keine
-produktive udev-Regel angelegt.
-Produktive Geräte/Services werden dabei nicht umgeschaltet.
+`--app-dir` aliases `--target`. Use `--page overview|spacemouse|setup|log` and
+`--size 1100x850` for reproducible screenshots. Screenshot and smoke modes only
+read status: they do not launch Fusion, change permissions or switch services.
+Tests use temporary installations, local Git repositories and synthetic input
+on private test ports; privileged actions are mocked.
 
-Der Manager und die direkte Linux-Eingabeschicht sind eigene Implementierungen.
-Der verwendete ältere Wine-SDK-Bridge-Code bleibt GPL-3.0-or-later, MinHook
-behält seine eigene Lizenz. Siehe `spacemouse/bridge/COPYING` und die Quellhinweise
-in `spacemouse/README.md`. Qt wird dynamisch gebunden.
+The manager and direct Linux input layer are original implementations under
+GPL-3.0-or-later. The reviewed Wine SDK bridge keeps its GPL license; MinHook
+retains its own license. Qt is dynamically linked. See
+[SpaceMouse documentation](../spacemouse/README.md) and
+[bridge license](../spacemouse/bridge/COPYING).

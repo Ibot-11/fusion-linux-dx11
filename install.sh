@@ -12,21 +12,21 @@ REQUESTED_PROTON=""
 
 usage() {
   cat <<'HELP'
-Verwendung: ./install.sh [MODUS] [INSTALLATIONSORDNER] [OPTIONEN]
-  --patch             Vorhandene Fusion-Installation einrichten
-  --clean             Autodesk-Installer starten und Linux-Integration einrichten
-  --update, -u        Git-Branch aktualisieren und neuen Repo-Stand installieren
-  --apply-update      Aktuellen Checkout lokal anwenden (ohne Git-Download)
-  --build-layer       Nur den Vulkan-Layer kompilieren
-  --with-spacemouse   SpaceMouse-Unterstützung bauen und aktivieren
-  --without-spacemouse SpaceMouse-Komponente nicht installieren/ändern
-  --prefix NAME       Prefix-Ordner für eine Neuinstallation
-  --proton ORDNER     Installierten Proton-Ordner verwenden
-  --installer DATEI   Vorhandene Autodesk-Installer-EXE für --clean
-  --version, -v       Version anzeigen
-  --help, -h          Diese Hilfe
-Ohne Argumente startet das Menü. Updates behalten Prefix, Proton, GPU-, DXVK-
-und SpaceMouse-Einstellungen. Fusion muss vorher vollständig geschlossen sein.
+Usage: ./install.sh [MODE] [INSTALLATION_FOLDER] [OPTIONS]
+  --patch             Set up an existing Fusion installation
+  --clean             Run the Autodesk installer and set up the Linux integration
+  --update, -u        Update the Git branch and install the new revision
+  --apply-update      Apply the current checkout without downloading updates
+  --build-layer       Build the Vulkan layer only
+  --with-spacemouse   Build and enable SpaceMouse support
+  --without-spacemouse Keep the SpaceMouse component unchanged
+  --prefix NAME       Prefix folder for a new installation
+  --proton FOLDER     Use an installed Proton folder
+  --installer FILE    Use an existing Autodesk installer EXE with --clean
+  --version, -v       Show version
+  --help, -h          Show help
+With no arguments, opens the menu. Updates preserve prefix, Proton, GPU, DXVK
+and SpaceMouse settings. Close Fusion before installing or updating.
 HELP
 }
 
@@ -35,15 +35,15 @@ while (($#)); do
     --version|-v) echo "fusion-linux-dx11 installer version $VERSION"; exit 0 ;;
     --help|-h) usage; exit 0 ;;
     --patch|--clean|--update|--apply-update|--build-layer|-u)
-      [[ "$MODE" == menu ]] || { echo 'Bitte nur einen Modus wählen.' >&2; exit 1; }
+      [[ "$MODE" == menu ]] || { echo 'Choose only one mode.' >&2; exit 1; }
       MODE="${1#--}"; [[ "$MODE" == -u ]] && MODE=update
       ;;
     --with-spacemouse) SPACE=on ;;
     --without-spacemouse) SPACE=off ;;
-    --prefix) shift; REQUESTED_PREFIX="${1:?--prefix benötigt einen Ordnernamen}" ;;
-    --proton) shift; REQUESTED_PROTON="${1:?--proton benötigt einen Ordnerpfad}" ;;
-    --installer) shift; INSTALLER="${1:?--installer benötigt einen Dateipfad}" ;;
-    --*) echo "Unbekannte Option: $1" >&2; usage; exit 1 ;;
+    --prefix) shift; REQUESTED_PREFIX="${1:?--prefix requires a folder name}" ;;
+    --proton) shift; REQUESTED_PROTON="${1:?--proton requires a folder path}" ;;
+    --installer) shift; INSTALLER="${1:?--installer requires a file path}" ;;
+    --*) echo "Unknown option: $1" >&2; usage; exit 1 ;;
     *) TARGET_DIR="$1" ;;
   esac
   shift
@@ -51,27 +51,27 @@ done
 
 if [[ "$MODE" == menu ]]; then
   echo "Autodesk Fusion Linux – Installer v$VERSION"
-  echo '1) Vorhandene Installation einrichten'
-  echo '2) Frische Neuinstallation'
-  echo '3) Installation aus dem Git-Repository aktualisieren'
-  echo '4) Nur Vulkan-Layer kompilieren'
-  echo '5) Beenden'
-  read -rp 'Auswahl [1-5]: ' choice
+  echo '1) Set up an existing installation'
+  echo '2) New installation'
+  echo '3) Update from the Git repository'
+  echo '4) Build the Vulkan layer only'
+  echo '5) Exit'
+  read -rp 'Choose [1-5]: ' choice
   case "$choice" in
     1) MODE=patch ;; 2) MODE=clean ;; 3) MODE=update ;;
     4) MODE=build-layer ;; 5) exit 0 ;; *) exit 1 ;;
   esac
   if [[ "$MODE" != build-layer ]]; then
-    read -rp "Installationsverzeichnis [$TARGET_DIR]: " chosen
+    read -rp "Installation folder [$TARGET_DIR]: " chosen
     TARGET_DIR="${chosen:-$TARGET_DIR}"
   fi
 fi
 
-command -v python3 >/dev/null || { echo 'Bitte Python 3 installieren.' >&2; exit 1; }
+command -v python3 >/dev/null || { echo 'Install Python 3 to continue.' >&2; exit 1; }
 TARGET_DIR="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$TARGET_DIR")"
 
 if [[ "$MODE" == update ]]; then
-  command -v git >/dev/null || { echo 'Bitte Git installieren.' >&2; exit 1; }
+  command -v git >/dev/null || { echo 'Install Git to continue.' >&2; exit 1; }
   update_args=(--repo "$SCRIPT_DIR" --target "$TARGET_DIR")
   [[ "$SPACE" == on ]] && update_args+=(--with-spacemouse)
   [[ "$SPACE" == off ]] && update_args+=(--without-spacemouse)
@@ -79,7 +79,7 @@ if [[ "$MODE" == update ]]; then
 fi
 
 for tool in cc make; do
-  command -v "$tool" >/dev/null || { echo "Bitte $tool installieren (build-essential / base-devel)." >&2; exit 1; }
+  command -v "$tool" >/dev/null || { echo "Install $tool (build-essential / base-devel) to continue." >&2; exit 1; }
 done
 if [[ "$MODE" == build-layer ]]; then
   make -C "$SCRIPT_DIR/layer"
@@ -91,17 +91,17 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(sys.argv[1]) / 'spacemouse'))
 from processes import fusion_running
-if fusion_running(): raise SystemExit('Bitte Fusion vor der Einrichtung/Aktualisierung vollständig schließen.')
+if fusion_running(): raise SystemExit('Close Fusion before installing or updating.')
 PYCODE
 
 if [[ "$MODE" == apply-update && ! -d "$TARGET_DIR" ]]; then
-  echo "Installation fehlt: $TARGET_DIR" >&2; exit 1
+  echo "Installation not found: $TARGET_DIR" >&2; exit 1
 fi
 if [[ "$MODE" == patch && ! -d "$TARGET_DIR" ]]; then
-  echo "Installation fehlt: $TARGET_DIR; für eine neue Installation --clean verwenden." >&2; exit 1
+  echo "Installation not found: $TARGET_DIR; use --clean for a new installation." >&2; exit 1
 fi
 if [[ "$MODE" == clean && ( -f "$TARGET_DIR/prefix-dir" || -d "$TARGET_DIR/${REQUESTED_PREFIX:-compatdata-exp-dx11}/pfx" ) ]]; then
-  echo 'Hier ist bereits eine Installation vorhanden. Bitte --patch oder --update verwenden.' >&2; exit 1
+  echo 'An installation already exists. Use --patch or --update.' >&2; exit 1
 fi
 
 PREFIX="${REQUESTED_PREFIX:-compatdata-exp-dx11}"
@@ -112,7 +112,7 @@ python3 - "$PREFIX" <<'PYCODE'
 from pathlib import Path
 import sys
 p=sys.argv[1]
-if not p or Path(p).name != p or p in ('.','..'): raise SystemExit('Ungültiger Prefix-Ordnername.')
+if not p or Path(p).name != p or p in ('.','..'): raise SystemExit('Invalid prefix folder name.')
 PYCODE
 if [[ "$MODE" == patch && ! -d "$TARGET_DIR/$PREFIX" ]]; then
   SOURCE_PREFIX="compatdata"
@@ -121,16 +121,16 @@ if [[ "$MODE" == patch && ! -d "$TARGET_DIR/$PREFIX" ]]; then
 from pathlib import Path
 import sys
 p=sys.argv[1]
-if not p or Path(p).name != p or p in ('.','..'): raise SystemExit('Ungültiger Quell-Prefix-Ordnername.')
+if not p or Path(p).name != p or p in ('.','..'): raise SystemExit('Invalid source prefix folder name.')
 PYCODE
-  [[ -d "$TARGET_DIR/$SOURCE_PREFIX" ]] || { echo 'Kein Prefix gefunden. Bitte zuerst --clean ausführen oder prefix-dir korrekt setzen.' >&2; exit 1; }
-  echo "Erstelle ein isoliertes DX11-Prefix aus $SOURCE_PREFIX …"
+  [[ -d "$TARGET_DIR/$SOURCE_PREFIX" ]] || { echo 'No prefix found. Run --clean or correct prefix-dir.' >&2; exit 1; }
+  echo "Creating an isolated DX11 prefix from $SOURCE_PREFIX …"
   cp -a --reflink=auto "$TARGET_DIR/$SOURCE_PREFIX" "$TARGET_DIR/$PREFIX"
 fi
 
 if [[ -n "$REQUESTED_PROTON" ]]; then
   REQUESTED_PROTON="$(realpath "$REQUESTED_PROTON")"
-  [[ -f "$REQUESTED_PROTON/proton" ]] || { echo 'Der gewählte Proton-Ordner enthält kein proton-Startprogramm.' >&2; exit 1; }
+  [[ -f "$REQUESTED_PROTON/proton" ]] || { echo 'The selected Proton folder does not contain a proton launcher.' >&2; exit 1; }
 fi
 
 ENABLE_SPACE=0
@@ -140,7 +140,7 @@ elif [[ "$SPACE" == auto ]]; then
   if [[ -f "$TARGET_DIR/spacemouse/start.py" || -f "$TARGET_DIR/spacemouse-enabled" ]]; then
     SPACE=on
   elif [[ "$MODE" != apply-update && -t 0 ]]; then
-    read -rp 'direkte SpaceMouse-Unterstützung installieren? [j/N]: ' answer
+    read -rp 'Install direct SpaceMouse support? [y/N]: ' answer
     if [[ "${answer:-n}" =~ ^[JjYy] ]]; then SPACE=on; ENABLE_SPACE=1; else SPACE=off; fi
   else
     SPACE=off
@@ -148,13 +148,13 @@ elif [[ "$SPACE" == auto ]]; then
 fi
 
 for manager_tool in c++ pkg-config; do
-  command -v "$manager_tool" >/dev/null || { echo "Fusion Manager benötigt $manager_tool." >&2; exit 1; }
+  command -v "$manager_tool" >/dev/null || { echo "Fusion Manager requires $manager_tool." >&2; exit 1; }
 done
-pkg-config --exists Qt6Widgets || { echo 'Fusion Manager benötigt Qt-6-Widgets-Entwicklungsdateien (qt6-base-dev / qt6-base).' >&2; exit 1; }
+pkg-config --exists Qt6Widgets || { echo 'Fusion Manager requires Qt 6 Widgets development files (qt6-base-dev / qt6-base).' >&2; exit 1; }
 make -C "$SCRIPT_DIR/layer"
 make -C "$SCRIPT_DIR/manager"
 if [[ "$SPACE" == on ]]; then
-  command -v systemctl >/dev/null || { echo 'SpaceMouse benötigt eine systemd-Benutzersitzung.' >&2; exit 1; }
+  command -v systemctl >/dev/null || { echo 'SpaceMouse requires a systemd user session.' >&2; exit 1; }
   bash "$SCRIPT_DIR/spacemouse/build.sh"
 fi
 
@@ -169,7 +169,7 @@ from pathlib import Path
 import sys
 app, proton = map(Path, sys.argv[1:])
 proton = proton.expanduser().resolve()
-if not (proton / 'proton').is_file(): raise SystemExit('Der gewählte Proton-Ordner enthält kein proton-Startprogramm.')
+if not (proton / 'proton').is_file(): raise SystemExit('The selected Proton folder does not contain a proton launcher.')
 (app / 'proton-version').write_text(proton.name + '\n')
 (app / 'proton-path').write_text(str(proton) + '\n')
 PYCODE
@@ -177,19 +177,19 @@ fi
 
 if [[ "$MODE" == clean ]]; then
   if [[ -z "$INSTALLER" ]]; then
-    command -v curl >/dev/null || { echo 'Bitte curl installieren oder --installer DATEI angeben.' >&2; exit 1; }
+    command -v curl >/dev/null || { echo 'Install curl or specify --installer FILE.' >&2; exit 1; }
     INSTALLER="$TARGET_DIR/Fusion360installer.exe"
-    echo 'Lade den offiziellen Autodesk-Installer herunter …'
+    echo 'Downloading the official Autodesk installer …'
     curl --fail --location --retry 2 'https://dl.appstreaming.autodesk.com/production/installers/Fusion360installer.exe' -o "$INSTALLER"
   fi
-  [[ -f "$INSTALLER" ]] || { echo "Installer nicht gefunden: $INSTALLER" >&2; exit 1; }
+  [[ -f "$INSTALLER" ]] || { echo "Installer not found: $INSTALLER" >&2; exit 1; }
   INSTALLER="$(realpath "$INSTALLER")"
-  echo 'Bitte dem Autodesk-Setup folgen und Fusion danach schließen.'
+  echo 'Follow the Autodesk setup, then close Fusion.'
   "$TARGET_DIR/run-proton.sh" "$INSTALLER"
   python3 "$SCRIPT_DIR/scripts/setup_runtime.py" "${setup_args[@]}" --update
 fi
 
-echo 'Fertig. Verwaltung: fusion-manager; Start: autodesk-fusion; Updates: autodesk-fusion-update'
+echo 'Done. Manage: fusion-manager; Launch: autodesk-fusion; Update: autodesk-fusion-update'
 if [[ "$SPACE" == on ]]; then
-  echo 'SpaceMouse: Achsen, Tasten und Kamera im „Fusion Manager“. In Fusion den SpaceMouse-Treiber „Ältere / Legacy“ verwenden.'
+  echo 'SpaceMouse: adjust axes, buttons and camera in Fusion Manager. In Fusion, use the Legacy SpaceMouse driver.'
 fi

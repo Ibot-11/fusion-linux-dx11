@@ -41,34 +41,34 @@ static int existing_rule(int dir) {
 
 int main(int argc, char **) {
     if (argc != 1) {
-        std::fprintf(stderr, "Dieser feste Gerätezugriffshelfer akzeptiert keine Argumente.\n");
+        std::fprintf(stderr, "This device-access helper accepts no arguments.\n");
         return 2;
     }
     if (geteuid() != 0) {
         std::fprintf(stderr,
-                     "Administratorfreigabe über die Aktion „Gerätezugriff einrichten“ erforderlich.\n");
+                     "Administrator approval is required. Use Set up access in Fusion Manager.\n");
         return 1;
     }
     int dir = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (dir < 0)
-        return fail("udev-Regelverzeichnis konnte nicht geöffnet werden");
+        return fail("Could not open the udev rules folder");
     struct stat info{};
     if (fstat(dir, &info) != 0 || info.st_uid != 0 || (info.st_mode & 0022)) {
         close(dir);
         errno = EPERM;
-        return fail("Unsicheres udev-Regelverzeichnis");
+        return fail("Unsafe udev rules folder");
     }
     int existing = existing_rule(dir);
     if (existing < 0) {
         close(dir);
-        return fail("Eine vorhandene fremde oder unsichere Regeldatei bleibt unverändert");
+        return fail("An existing unrelated or unsafe rule file was preserved");
     }
     if (!existing) {
         const std::string temporary = ".fusion-spacemouse-" + std::to_string(getpid()) + ".tmp";
         int fd = openat(dir, temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0644);
         if (fd < 0) {
             close(dir);
-            return fail("Regeldatei konnte nicht angelegt werden");
+            return fail("Could not create the rule file");
         }
         size_t done = 0;
         const size_t length = std::strlen(rule);
@@ -89,14 +89,14 @@ int main(int argc, char **) {
         if (!installed) {
             close(dir);
             errno = saved;
-            return fail("Regel konnte nicht sicher installiert werden");
+            return fail("Could not safely install the rule");
         }
         fsync(dir);
     }
     close(dir);
     pid_t child = fork();
     if (child < 0)
-        return fail("udev-Regeln konnten nicht neu geladen werden");
+        return fail("Could not reload udev rules");
     if (child == 0) {
         char *const arguments[] = {const_cast<char *>("udevadm"), const_cast<char *>("control"),
                                    const_cast<char *>("--reload-rules"), nullptr};
@@ -106,14 +106,14 @@ int main(int argc, char **) {
     int status = 0;
     while (waitpid(child, &status, 0) < 0) {
         if (errno != EINTR)
-            return fail("udevadm konnte nicht abgewartet werden");
+            return fail("Could not wait for udevadm");
     }
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        std::fprintf(stderr, "Die feste Regel wurde gespeichert, aber udev konnte sie nicht neu laden. Bitte "
-                             "nach einem Neustart den Empfänger neu anschließen.\n");
+        std::fprintf(stderr, "The rule was saved, but udev could not reload it. "
+                             "Restart the system and reconnect the receiver.\n");
         return 1;
     }
-    std::puts("Gerätezugriff vorbereitet. Universal Receiver jetzt abziehen und erneut anschließen. Eine "
-              "aktive lokale Desktop-Sitzung ist erforderlich.");
+    std::puts("Device access configured. Unplug and reconnect the Universal Receiver. An "
+              "active local desktop session is required.");
     return 0;
 }

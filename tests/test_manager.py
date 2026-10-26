@@ -110,12 +110,12 @@ class ManagerTests(unittest.TestCase):
         (self.app/'spacemouse/start.py').write_text('legacy driver supervisor')
         with patch.object(manager,'fusion_running',return_value=False),patch.object(manager,'run') as run:
             for name in ('driver-start','driver-stop','enable','disable'):
-                with self.subTest(action=name),self.assertRaisesRegex(ValueError,'Checkout'):self.action(name)
+                with self.subTest(action=name),self.assertRaisesRegex(ValueError,'checkout'):self.action(name)
             run.assert_not_called()
 
     def test_access_setup_missing_pkexec_does_not_run_any_helper(self):
         with patch.object(manager.shutil,'which',return_value=None),patch.object(manager.subprocess,'run') as run:
-            with self.assertRaisesRegex(ValueError,'pkexec fehlt'):self.action('setup-access')
+            with self.assertRaisesRegex(ValueError,'pkexec is missing'):self.action('setup-access')
             run.assert_not_called()
 
     def test_access_setup_only_runs_fixed_helper_without_user_paths_or_arguments(self):
@@ -128,11 +128,11 @@ class ManagerTests(unittest.TestCase):
         helper=self.root/'fixed-helper';helper.touch();helper.chmod(0o755)
         for code in (126,127):
             with self.subTest(code=code),patch.object(manager.shutil,'which',return_value='/usr/bin/pkexec'),patch.object(manager,'access_helper',return_value=helper),patch.object(manager.subprocess,'run',return_value=argparse.Namespace(returncode=code)):
-                with self.assertRaisesRegex(ValueError,'abgebrochen oder nicht erteilt'):self.action('setup-access')
+                with self.assertRaisesRegex(ValueError,'cancelled or denied'):self.action('setup-access')
 
     def test_access_setup_missing_helper_does_not_invoke_pkexec(self):
         with patch.object(manager.shutil,'which',return_value='/usr/bin/pkexec'),patch.object(manager,'access_helper',return_value=self.root/'missing'),patch.object(manager.subprocess,'run') as run:
-            with self.assertRaisesRegex(ValueError,'zugriffshelfer fehlt'):self.action('setup-access')
+            with self.assertRaisesRegex(ValueError,'access helper is missing'):self.action('setup-access')
             run.assert_not_called()
 
     def test_status_identifies_raw_access_missing_despite_readable_evdev_fallback(self):
@@ -149,7 +149,7 @@ class ManagerTests(unittest.TestCase):
         # No pkexec/elevation and no supported no-argument invocation here.
         target=self.root/'must-never-exist'
         result=subprocess.run([str(REPO/'.build/manager/fusion-spacemouse-access'),'--target',str(target)],capture_output=True,text=True)
-        self.assertEqual(result.returncode,2);self.assertIn('keine Argumente',result.stderr);self.assertFalse(target.exists())
+        self.assertEqual(result.returncode,2);self.assertIn('no arguments',result.stderr);self.assertFalse(target.exists())
 
     def test_other_steam_library_proton_is_discovered(self):
         steam=self.root/'.local/share/Steam';(steam/'steamapps').mkdir(parents=True)

@@ -61,7 +61,7 @@ def main():
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        print('Die Fusion-SpaceMouse-Brücke läuft bereits.', file=sys.stderr)
+        print('The Fusion SpaceMouse bridge is already running.', file=sys.stderr)
         lock.close()
         return 1
     selector = selectors.DefaultSelector()
@@ -147,7 +147,7 @@ def main():
         server.listen(4)
         server.setblocking(False)
         selector.register(server, selectors.EVENT_READ, 'server')
-        notify('READY=1\nSTATUS=Direkte HID-Brücke bereit; wartet auf Gerät')
+        notify('READY=1\nSTATUS=Direct HID bridge ready; waiting for a device')
         while not stopping:
             now = time.monotonic()
             if now - last_config > 1:
@@ -192,9 +192,9 @@ def main():
                                 watchdog.motion(initial, now)
                                 state.update(axes=initial, raw=list(decoder.raw))
                             selector.register(device, selectors.EVENT_READ, 'device')
-                            warning = None if mode == 'hidraw' else ('Eingeschränkter evdev-Fallback: Kein verlässlicher HID-Berichtstakt. '
-                                       'Nach 250 ms ohne Achsenänderung wird sicher neutralisiert. '
-                                       'Für Haltebewegungen „Gerätezugriff einrichten“ verwenden.')
+                            warning = None if mode == 'hidraw' else ('Limited evdev fallback: no reliable HID report timing. '
+                                       'Motion stops after 250 ms without an axis change. '
+                                       'Use Set up access to enable held motion.')
                             state.update(connected=True, device=candidate, input_backend=mode,
                                          error=None, warning=warning, motion_watchdog=False)
                             break
@@ -204,8 +204,8 @@ def main():
                             device = decoder = mode = None
                             state['error'] = f"{candidate['path']}: {error}"
                 if device is None:
-                    message = ('Rohzugriff einrichten: Der erkannte Universal Receiver hat noch keine HID-Leserechte.'
-                               if hid_devices else 'Keine lesbare SpaceMouse mit geprüftem Profil gefunden.')
+                    message = ('Set up access: the Universal Receiver needs HID read permission.'
+                               if hid_devices else 'No readable SpaceMouse with a supported profile found.')
                     state.update(connected=False, device=None, input_backend=None, error=message)
             timeout = watchdog.wait(time.monotonic())
             if mode == 'evdev':
@@ -257,7 +257,7 @@ def main():
             drop(client)
         server.close()
         selector.close()
-        state.update(connected=False, clients=0, error='Brücke beendet')
+        state.update(connected=False, clients=0, error='Bridge stopped')
         write_status(state)
         lock.close()
 

@@ -43,7 +43,7 @@ def copy_file(source, target, executable=False):
 
 def valid_prefix(prefix):
     if not prefix or Path(prefix).name != prefix or prefix in (".", ".."):
-        raise ValueError("Das Prefix muss ein einzelner Ordnername sein.")
+        raise ValueError("The prefix must be a single folder name.")
     return prefix
 
 
@@ -136,16 +136,16 @@ def deploy_desktop(app):
         suffix = " %F" if name == "autodesk-fusion" else " %u"
         text = "\n".join("Exec=" + line + suffix if row.startswith("Exec=") else row for row in text.splitlines()) + "\n"
         atomic_write(apps / (name + ".desktop"), text.encode(), 0o755)
-    atomic_write(apps / "autodesk-fusion-update.desktop", desktop_entry(app, "update.py", "Fusion aktualisieren", "Linux-Integration aus dem Git-Repository aktualisieren", True), 0o755)
+    atomic_write(apps / "autodesk-fusion-update.desktop", desktop_entry(app, "update.py", "Update Fusion", "Update the Linux integration from its Git repository", True), 0o755)
     copy_file(REPO / "desktop/autodesk-fusion.png", data / "icons/hicolor/256x256/apps/autodesk-fusion.png")
     local_bin = Path.home() / ".local/bin"
     local_bin.mkdir(parents=True, exist_ok=True)
-    atomic_write(apps / "fusion-manager.desktop", desktop_entry(app, "manager.sh", "Fusion Manager", "Fusion, Updates und SpaceMouse verwalten"), 0o755)
+    atomic_write(apps / "fusion-manager.desktop", desktop_entry(app, "manager.sh", "Fusion Manager", "Manage Fusion, updates and SpaceMouse"), 0o755)
     (apps / "fusion-spacemouse.desktop").unlink(missing_ok=True)
     for name, destination in (("autodesk-fusion", "launch.sh"), ("autodesk-fusion-update", "update.py"), ("fusion-manager", "manager.sh")):
         link = local_bin / name
         if link.exists() and not link.is_symlink():
-            print(f"Vorhandene Datei bleibt erhalten: {link}")
+            print(f"Keeping existing file: {link}")
             continue
         link.unlink(missing_ok=True)
         link.symlink_to(app / destination)
@@ -229,10 +229,10 @@ def deploy(repo, app, prefix, version, spacemouse=False, update=False, desktop=T
     repo, app = Path(repo).resolve(), Path(app).resolve()
     valid_prefix(prefix)
     if fusion_running():
-        raise ValueError("Bitte Fusion vor der Installation oder Aktualisierung vollständig schließen.")
+        raise ValueError("Close Fusion before installing or updating.")
     app.mkdir(parents=True, exist_ok=True)
     backup = snapshot(app)
-    print(f"Sicherung ersetzter Dateien: {backup}")
+    print(f"Backup: {backup}")
     migrate_gpu_preferences(app)
     for name in RUNTIME_FILES:
         copy_file(repo / "scripts" / name, app / name, True)
@@ -294,7 +294,7 @@ def deploy(repo, app, prefix, version, spacemouse=False, update=False, desktop=T
     if desktop:
         deploy_desktop(app)
     atomic_write(app / "repo-state.json", json.dumps(repository_state(repo, version), indent=2).encode(), 0o600)
-    print(f"Fusion-Linux {version} eingerichtet. Vorhandene Einstellungen bleiben erhalten.")
+    print(f"Fusion Linux {version} installed. Existing settings preserved.")
     return backup
 
 
@@ -314,7 +314,7 @@ def main():
             deploy(REPO, args.target, args.prefix, args.version, args.spacemouse, args.update,
                    enable_spacemouse=args.enable_spacemouse)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
-        raise SystemExit(f"Einrichtung abgebrochen: {error}")
+        raise SystemExit(f"Setup stopped: {error}")
 
 
 if __name__ == "__main__":

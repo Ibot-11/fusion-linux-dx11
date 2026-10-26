@@ -10,11 +10,11 @@ production="$APP_DIR/$PREFIX_DIR/pfx/drive_c"
 FUSION="$(find "$production" -type f -name Fusion360.exe -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || true)"
 if [[ -z "$FUSION" ]]; then
   if command -v kdialog >/dev/null 2>&1; then
-    kdialog --error 'Autodesk Fusion 360 ist in diesem Prefix noch nicht installiert.'
+    kdialog --error 'Autodesk Fusion is not installed in this prefix.'
   elif command -v zenity >/dev/null 2>&1; then
-    zenity --error --text='Autodesk Fusion 360 ist in diesem Prefix noch nicht installiert.'
+    zenity --error --text='Autodesk Fusion is not installed in this prefix.'
   else
-    echo "Fehler: Fusion360.exe nicht gefunden in $production" >&2
+    echo "Error: Fusion360.exe not found in $production" >&2
   fi
   exit 1
 fi
@@ -29,17 +29,17 @@ fi
 if [[ -f "$APP_DIR/spacemouse-enabled" ]]; then
   if [[ -f "$APP_DIR/spacemouse/camera_gain.py" ]]; then
     if ! python3 "$APP_DIR/spacemouse/camera_gain.py" --apply >> "$APP_DIR/logs/spacemouse-start.log" 2>&1; then
-      kdialog --passivepopup 'Die SpaceMouse-Kamerageschwindigkeit konnte nicht übernommen werden. Details im Fusion-Protokoll.' 10 || true
+      kdialog --passivepopup 'Could not apply SpaceMouse camera speed. See the Fusion log.' 10 || true
     elif fusion_camera_scale="$(python3 "$APP_DIR/spacemouse/camera_gain.py" --runtime-scale)"; then
       export FUSION_SPACEMOUSE_CAMERA_SCALE="$fusion_camera_scale"
     else
-      kdialog --passivepopup 'Der zusätzliche SpaceMouse-Kamerafaktor konnte nicht gelesen werden.' 10 || true
+      kdialog --passivepopup 'Could not read the additional SpaceMouse camera factor.' 10 || true
     fi
   fi
   if ! python3 "$APP_DIR/spacemouse/install-sdk.py" "$FUSION" >> "$APP_DIR/logs/spacemouse-start.log" 2>&1 ||
      ! systemctl --user start fusion-spacemouse.service >> "$APP_DIR/logs/spacemouse-start.log" 2>&1; then
     if command -v kdialog >/dev/null 2>&1; then
-      kdialog --passivepopup 'SpaceMouse konnte nicht starten. Details im Fusion-SpaceMouse-Journal.' 10 || true
+      kdialog --passivepopup 'SpaceMouse could not start. See the Fusion SpaceMouse journal.' 10 || true
     fi
   fi
 fi

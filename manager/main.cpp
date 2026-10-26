@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Native Fusion Manager. GPL-3.0-or-later; Qt is dynamically linked.
+// Native Fusion Manager. Qt is dynamically linked.
 #include <QDesktopServices>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -11,34 +11,122 @@
 #include <array>
 #include <unistd.h>
 
-static QString text(const QJsonObject &o, const char *key,
-                    const QString &fallback = QStringLiteral("Unbekannt")) {
-    const auto value = o.value(QLatin1String(key));
+static QString text(const QJsonObject &object, const char *key,
+                    const QString &fallback = QStringLiteral("Unknown")) {
+    const auto value = object.value(QLatin1String(key));
     return value.isString() && !value.toString().isEmpty() ? value.toString() : fallback;
 }
+
 static QLabel *label(const QString &value, const char *kind = "") {
-    auto *w = new QLabel(value);
-    w->setWordWrap(true);
-    w->setProperty("kind", kind);
-    return w;
+    auto *widget = new QLabel(value);
+    widget->setWordWrap(true);
+    widget->setProperty("kind", kind);
+    return widget;
 }
-static QGroupBox *card(const QString &title, QVBoxLayout *layout) {
-    auto *box = new QGroupBox(QString(title).replace("&", "&&"));
-    box->setLayout(layout);
-    return box;
+
+static QToolButton *infoButton(const QString &title, const QString &explanation) {
+    auto *button = new QToolButton;
+    button->setText("i");
+    button->setObjectName("infoButton");
+    button->setFixedSize(22, 22);
+    button->setToolTip(explanation);
+    button->setAccessibleName("About " + title);
+    QObject::connect(button, &QToolButton::clicked, button,
+                     [button, title, explanation] { QMessageBox::information(button, title, explanation); });
+    return button;
 }
+
+static QFrame *panel(const QString &title, const QString &explanation, QVBoxLayout *content) {
+    auto *frame = new QFrame;
+    frame->setObjectName("panel");
+    frame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+    auto *layout = new QVBoxLayout(frame);
+    layout->setContentsMargins(18, 16, 18, 16);
+    layout->setSpacing(13);
+    auto *heading = new QHBoxLayout;
+    heading->setSpacing(8);
+    heading->addWidget(label(title, "section"));
+    heading->addStretch();
+    if (!explanation.isEmpty())
+        heading->addWidget(infoButton(title, explanation));
+    layout->addLayout(heading);
+    layout->addLayout(content);
+    return frame;
+}
+
+static QWidget *details(const QString &title, QWidget *content) {
+    auto *widget = new QWidget;
+    auto *layout = new QVBoxLayout(widget);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(10);
+    auto *toggle = new QToolButton;
+    toggle->setText(QString(title).replace("&", "&&"));
+    toggle->setObjectName("disclosure");
+    toggle->setCheckable(true);
+    toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toggle->setArrowType(Qt::RightArrow);
+    toggle->setAccessibleName(title);
+    content->hide();
+    QObject::connect(toggle, &QToolButton::toggled, widget, [toggle, content](bool expanded) {
+        toggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+        content->setVisible(expanded);
+    });
+    layout->addWidget(toggle, 0, Qt::AlignLeft);
+    layout->addWidget(content);
+    return widget;
+}
+
+static QIcon navigationIcon(int index) {
+    QPixmap pixmap(40, 40);
+    pixmap.fill(Qt::transparent);
+    pixmap.setDevicePixelRatio(2);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(QColor("#b4c1d3"), 1.45, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    if (index == 0) {
+        for (int x : {3, 11})
+            for (int y : {3, 11})
+                painter.drawRoundedRect(QRectF(x, y, 5.5, 5.5), 1, 1);
+    } else if (index == 1) {
+        painter.drawEllipse(QRectF(4.5, 3, 11, 7));
+        painter.drawArc(QRectF(4.5, 6, 11, 7), 180 * 16, 180 * 16);
+        painter.drawLine(QPointF(4.5, 6.5), QPointF(4.5, 9.5));
+        painter.drawLine(QPointF(15.5, 6.5), QPointF(15.5, 9.5));
+        painter.drawRoundedRect(QRectF(3, 13, 14, 4), 1.5, 1.5);
+    } else if (index == 2) {
+        for (int y : {5, 10, 15})
+            painter.drawLine(QPointF(3, y), QPointF(17, y));
+        painter.setBrush(QColor("#1b2330"));
+        painter.drawEllipse(QPointF(7, 5), 2, 2);
+        painter.drawEllipse(QPointF(13, 10), 2, 2);
+        painter.drawEllipse(QPointF(9, 15), 2, 2);
+    } else {
+        painter.drawRoundedRect(QRectF(2.5, 3.5, 15, 13), 1.5, 1.5);
+        painter.drawLine(QPointF(6, 7), QPointF(9, 10));
+        painter.drawLine(QPointF(9, 10), QPointF(6, 13));
+        painter.drawLine(QPointF(11, 13), QPointF(14, 13));
+    }
+    return QIcon(pixmap);
+}
+
 class Manager : public QMainWindow {
     QString backend, screenshot, currentAction;
     bool smoke = false, loaded = false, busy = false;
     QLineEdit *target = new QLineEdit, *repo = new QLineEdit, *installer = new QLineEdit;
-    QComboBox *prefix = new QComboBox;
-    QComboBox *proton = new QComboBox;
-    QCheckBox *withSpace = new QCheckBox("SpaceMouse mit einrichten");
-    QLabel *headline = label("Installation wird geprüft …", "hero"), *subtitle = label(""),
-           *fusionInfo = label(""), *repoInfo = label("");
-    QLabel *driverInfo = label(""), *hardwareInfo = label(""), *deviceSummary = label(""), *buttonState = label("");
-    QLabel *inputAccessInfo = label("", "warning"), *inputStateInfo = label("");
-    QLabel *result = label("Bereit"), *cameraHint = label("Wirksam beim nächsten Start von Fusion.");
+    QComboBox *prefix = new QComboBox, *proton = new QComboBox;
+    QCheckBox *withSpace = new QCheckBox("Include SpaceMouse");
+    QLabel *headline = label("Checking…", "badge"), *subtitle = label("", "muted"),
+           *fusionInfo = label("", "detail"), *repoInfo = label("", "detail");
+    QLabel *overviewPrefix = label("—"), *overviewProton = label("—"), *integrationVersion = label("—"),
+           *repoSummary = label("Checking…", "summary"), *repoBranch = label("", "muted"),
+           *repoCheck = label("", "muted"), *spaceOverview = label("", "muted"),
+           *overviewCamera = label("", "muted"), *locationSummary = label("", "muted");
+    QLabel *driverInfo = label("", "muted"), *hardwareInfo = label("", "detail"),
+           *deviceSummary = label("", "summary"), *buttonState = label("", "muted");
+    QLabel *inputAccessInfo = label("", "warning"), *inputStateInfo = label("", "muted");
+    QWidget *accessPanel = new QWidget;
+    QPushButton *cloneButton = nullptr;
+    QLabel *result = label("Ready", "muted"), *cameraHint = label("Next Fusion launch", "muted");
     QPlainTextEdit *log = new QPlainTextEdit;
     QProgressBar *progress = new QProgressBar;
     QSpinBox *deadzone = new QSpinBox, *camera = new QSpinBox;
@@ -58,22 +146,29 @@ class Manager : public QMainWindow {
         auto *button = new QPushButton(QString(title).replace("&", "&&"));
         button->setProperty("primary", primary);
         button->setProperty("action", action);
+        button->setObjectName("action-" + action);
         connect(button, &QPushButton::clicked, this, [this, action, extra] { startAction(action, extra); });
         mutationControls.append(button);
         return button;
     }
+
     QWidget *pathRow(QLineEdit *edit, const QString &placeholder, bool file = false) {
         edit->setPlaceholderText(placeholder);
         auto *row = new QWidget;
         auto *layout = new QHBoxLayout(row);
         layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(8);
         layout->addWidget(edit, 1);
-        auto *browse = new QPushButton("Auswählen …");
+        auto *browse = new QPushButton("Browse…");
         layout->addWidget(browse);
         connect(browse, &QPushButton::clicked, this, [this, edit, file] {
-            QString value = file ? QFileDialog::getOpenFileName(this, "Autodesk-Installer wählen",
-                                                                edit->text(), "Windows-Installer (*.exe)")
-                                 : QFileDialog::getExistingDirectory(this, "Ordner wählen", edit->text());
+            const QString value =
+                file ? QFileDialog::getOpenFileName(this, "Choose Autodesk installer", edit->text(),
+                                                    "Windows executable (*.exe)", nullptr,
+                                                    QFileDialog::DontUseNativeDialog)
+                     : QFileDialog::getExistingDirectory(this, "Choose folder", edit->text(),
+                                                         QFileDialog::ShowDirsOnly |
+                                                             QFileDialog::DontUseNativeDialog);
             if (!value.isEmpty()) {
                 edit->setText(value);
                 if (edit == target || edit == repo) {
@@ -82,36 +177,56 @@ class Manager : public QMainWindow {
                 }
             }
         });
-        mutationControls.append(edit);
-        mutationControls.append(browse);
+        mutationControls << edit << browse;
         return row;
     }
-    QWidget *page(const QString &title, const QString &description, QVBoxLayout *&layout) {
+
+    void page(const QString &title, const QString &explanation, QVBoxLayout *&layout) {
         auto *widget = new QWidget;
+        widget->setObjectName("page");
         layout = new QVBoxLayout(widget);
-        layout->setContentsMargins(30, 24, 30, 22);
+        layout->setContentsMargins(26, 22, 26, 24);
         layout->setSpacing(16);
-        layout->addWidget(label(title, "title"));
-        layout->addWidget(label(description, "muted"));
+        auto *heading = new QHBoxLayout;
+        heading->addWidget(label(title, "title"));
+        heading->addStretch();
+        if (!explanation.isEmpty())
+            heading->addWidget(infoButton(title, explanation));
+        layout->addLayout(heading);
         auto *scroll = new QScrollArea;
         scroll->setWidgetResizable(true);
         scroll->setFrameShape(QFrame::NoFrame);
         scroll->setWidget(widget);
         pages->addWidget(scroll);
-        return widget;
     }
+
+    static void detailLabel(QLabel *widget) {
+        widget->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    }
+
+    static void field(QGridLayout *layout, int row, const QString &name, QLabel *value) {
+        auto *caption = label(name, "muted");
+        layout->addWidget(caption, row, 0, Qt::AlignTop);
+        layout->addWidget(value, row, 1);
+        layout->setColumnStretch(1, 1);
+        layout->setHorizontalSpacing(20);
+        layout->setVerticalSpacing(12);
+    }
+
     QStringList base() const {
         QStringList args = {backend, "--target", target->text()};
         if (!repo->text().isEmpty())
             args << "--repo" << repo->text();
         return args;
     }
+
     void requestStatus() {
         if (statusProc->state() != QProcess::NotRunning || busy || target->text().isEmpty())
             return;
         statusBytes.clear();
         statusProc->start("python3", base());
     }
+
     void startAction(const QString &action, QStringList extra = {}) {
         if (busy)
             return;
@@ -153,107 +268,149 @@ class Manager : public QMainWindow {
         for (auto *widget : mutationControls)
             widget->setEnabled(false);
         progress->show();
-        result->setText("Aktion läuft …");
+        result->setText("Working…");
         log->appendPlainText("\n› " + action + "\n");
         operation->setProcessChannelMode(QProcess::MergedChannels);
         operation->start("python3", base() + QStringList{"--action", action} + extra);
     }
+
     void updateStatus(const QJsonObject &s) {
         last = s;
         updateAvailability();
         const auto r = s["repo"].toObject(), installed = s["installed"].toObject();
         const bool present = s["fusion"].isString(), running = s["running"].toBool();
-        headline->setText(running ? "Fusion läuft" : present ? "Fusion ist bereit" : "Fusion einrichten");
-        subtitle->setText(present ? "Autodesk Fusion " + text(s, "fusion_version") + "  ·  " +
-                                        (running ? "Aktive Sitzung" : "Bereit zum Starten")
-                                  : "Wähle eine bestehende Installation oder starte eine neue Einrichtung.");
-        fusionInfo->setText("Fusion-Version: " + text(s, "fusion_version", "Nicht installiert") +
-                            "\nLinux-Integration: " +
+        headline->setText(running ? "●  Running" : present ? "●  Ready" : "Not installed");
+        headline->setProperty("tone", running || present ? "good" : "neutral");
+        headline->style()->unpolish(headline);
+        headline->style()->polish(headline);
+        subtitle->setText(present ? "Version " + text(s, "fusion_version")
+                                  : "Choose an installation in Setup");
+        overviewPrefix->setText(text(s, "prefix"));
+        overviewProton->setText(text(s, "proton"));
+        integrationVersion->setText(
+            text(installed, "version",
+                 s["integration_exists"].toBool() ? "Existing · unlinked" : "Not configured"));
+        fusionInfo->setText("Fusion: " + text(s, "fusion_version", "Not installed") + "\nIntegration: " +
                             text(installed, "version",
-                                 s["integration_exists"].toBool() ? "Vorhanden · Version nicht zugeordnet"
-                                                                  : "Noch nicht eingerichtet") +
-                            "\nInstallierte Revision: " + text(installed, "revision", "Unbekannt").left(12) +
-                            "\nPrefix: " + text(s, "prefix") + "\nProton: " + text(s, "proton") +
-                            "\nPfad: " + text(s, "fusion", "Keine Fusion360.exe gefunden"));
-        QString gitInfo = "Checkout: " + text(r, "path", "Nicht zugeordnet");
+                                 s["integration_exists"].toBool() ? "Installed; version metadata unavailable"
+                                                                  : "Not configured") +
+                            "\nRevision: " + text(installed, "revision") + "\nPrefix: " + text(s, "prefix") +
+                            "\nProton: " + text(s, "proton") +
+                            "\nExecutable: " + text(s, "fusion", "Fusion360.exe not found"));
+        locationSummary->setText(QFileInfo(target->text()).fileName());
+        locationSummary->setToolTip(target->text());
+
+        QString gitInfo = "Checkout: " + text(r, "path", "Not linked");
         if (r["valid"].toBool()) {
-            gitInfo += "\nRepo-Version: " + text(r, "version") + "  ·  Branch: " + text(r, "branch") +
-                       "\nRevision: " + text(r, "revision").left(12);
-            gitInfo += r["dirty"].toBool()
-                           ? "\nLokale Änderungen vorhanden – Git-Update schützt diese Dateien."
-                           : "\nArbeitsverzeichnis unverändert.";
-            if (r["behind"].isDouble())
-                gitInfo += "\n" + QString::number(r["behind"].toInt()) + " neue Commits, " +
-                           QString::number(r["ahead"].toInt()) + " eigene Commits gegenüber " +
-                           text(r, "upstream");
+            const bool dirty = r["dirty"].toBool();
+            const int ahead = r["ahead"].toInt(), behind = r["behind"].toInt();
+            if (dirty)
+                repoSummary->setText("Local changes");
+            else if (!r["upstream"].isString())
+                repoSummary->setText("No update source");
+            else if (ahead > 0)
+                repoSummary->setText("Local commits");
+            else if (behind > 0)
+                repoSummary->setText(QString::number(behind) +
+                                     (behind == 1 ? " new commit" : " new commits"));
             else
-                gitInfo += "\nKein Upstream zum Vergleichen eingerichtet.";
-            gitInfo +=
-                r["checked"].isDouble()
-                    ? "\nLetzter Abruf: " + QDateTime::fromSecsSinceEpoch(qint64(r["checked"].toDouble()))
-                                                .toString("dd.MM.yyyy HH:mm")
-                    : "\nNoch kein Remote-Abruf. Mit „Updates prüfen“ vergleichen.";
-        } else
-            gitInfo += "\nKein verwendbarer Git-Checkout. Bitte unter Einrichtung auswählen.";
-        repoInfo->setText(gitInfo);
-        QStringList devices;
-        for (const auto &entry : s["devices"].toArray()) {
-            auto d = entry.toObject();
-            devices << (text(d, "backend", "evdev") == "hidraw" ? "Direktes HID · " : "evdev-Fallback · ") +
-                           text(d, "name") + "  ·  " + text(d, "path") +
-                           (d["readable"].toBool() ? "  ·  lesbar"
-                                                   : "  ·  keine Leserechte in dieser Sitzung");
-            devices << QString("USB %1:%2")
-                           .arg(d["vendor"].toInt(), 4, 16, QChar('0'))
-                           .arg(d["product"].toInt(), 4, 16, QChar('0'));
-            const auto info = d["axis_info"].toArray();
-            if (!info.isEmpty()) {
-                auto a = info[0].toObject();
-                QString detail =
-                    QString("Bereich X: %1 bis %2").arg(a["minimum"].toInt()).arg(a["maximum"].toInt());
-                if (a.contains("fuzz") && a.contains("flat"))
-                    detail += QString(" · Fuzz %1 · Flat %2").arg(a["fuzz"].toInt()).arg(a["flat"].toInt());
-                devices << detail;
-            }
+                repoSummary->setText(r["checked"].isDouble() ? "Up to date" : "Check for updates");
+            repoSummary->setProperty("tone", dirty || ahead ? "warning" : "normal");
+            repoBranch->setText(text(r, "branch") + "  ·  " + text(r, "version", "Version unknown"));
+            repoCheck->setText(r["checked"].isDouble() ? "Checked " + QDateTime::fromSecsSinceEpoch(
+                                                                          qint64(r["checked"].toDouble()))
+                                                                          .toString("MMM d, HH:mm")
+                                                       : "Remote not checked yet");
+            gitInfo += "\nVersion: " + text(r, "version") + "\nBranch: " + text(r, "branch") +
+                       "\nRevision: " + text(r, "revision") +
+                       (dirty ? "\nWorking tree: local changes" : "\nWorking tree: clean");
+            if (r["behind"].isDouble())
+                gitInfo += QString("\nUpstream: %1\nBehind: %2 · Ahead: %3")
+                               .arg(text(r, "upstream"))
+                               .arg(behind)
+                               .arg(ahead);
+            else
+                gitInfo += "\nNo upstream configured";
+            gitInfo += "\n" + repoCheck->text();
+        } else {
+            repoSummary->setText("Checkout not found");
+            repoBranch->setText("Select or restore a repository in Setup");
+            repoCheck->clear();
+            gitInfo += "\nNo usable Git checkout. Choose a folder in Setup.";
         }
-        hardwareInfo->setText(
-            devices.isEmpty()
-                ? "Keine passende SpaceMouse gefunden. Gerät/Empfänger anschließen und einschalten."
-                : devices.join("\n"));
+        repoSummary->style()->unpolish(repoSummary);
+        repoSummary->style()->polish(repoSummary);
+        repoInfo->setText(gitInfo);
+        cloneButton->setVisible(!r["valid"].toBool());
+
+        QStringList deviceDetails;
         const auto detected = s["devices"].toArray();
-        deviceSummary->setText(detected.isEmpty()
-            ? "SpaceMouse anschließen und einschalten."
-            : text(detected.first().toObject(), "name")
-                  .replace("3Dconnexion 3Dconnexion", "3Dconnexion") + " · 6 Achsen");
+        for (const auto &entry : detected) {
+            const auto device = entry.toObject();
+            deviceDetails << (text(device, "backend", "evdev") == "hidraw" ? "Direct HID · "
+                                                                           : "evdev fallback · ") +
+                                 text(device, "name") + "\n" + text(device, "path") +
+                                 (device["readable"].toBool() ? " · Read access" : " · No read access");
+            deviceDetails << QString("USB %1:%2")
+                                 .arg(device["vendor"].toInt(), 4, 16, QChar('0'))
+                                 .arg(device["product"].toInt(), 4, 16, QChar('0'));
+            const auto axes = device["axis_info"].toArray();
+            if (!axes.isEmpty()) {
+                const auto axis = axes[0].toObject();
+                QString range =
+                    QString("X range: %1 to %2").arg(axis["minimum"].toInt()).arg(axis["maximum"].toInt());
+                if (axis.contains("fuzz") && axis.contains("flat"))
+                    range +=
+                        QString(" · Fuzz %1 · Flat %2").arg(axis["fuzz"].toInt()).arg(axis["flat"].toInt());
+                deviceDetails << range;
+            }
+            if (device["profile"].isString())
+                deviceDetails << "Profile: " + text(device, "profile");
+            if (device["descriptor_sha256"].isString())
+                deviceDetails << "Descriptor SHA-256: " + text(device, "descriptor_sha256");
+            deviceDetails << "";
+        }
+        deviceSummary->setText(detected.isEmpty() ? "No device detected"
+                                                  : text(detected.first().toObject(), "name")
+                                                        .replace("3Dconnexion 3Dconnexion", "3Dconnexion"));
         const auto access = s["input_access"].toObject();
-        QString accessMessage;
-        if (access["requires_setup"].toBool())
-            accessMessage =
-                "Rohzugriff einrichten: Der Universal Receiver ist erkannt, aber HID-Leserechte fehlen. "
-                "Der evdev-Fallback ist eingeschränkt: Konstantes Halten wird nach 250 ms ohne "
-                "Achsenänderung unterbrochen. "
-                "Für vollständige Originalreports „Gerätezugriff einrichten“ wählen und den Empfänger danach "
-                "neu anschließen.";
-        else if (access["hid_readable"].toBool())
-            accessMessage = "Direkter HID-Rohzugriff ist verfügbar. Originalreports werden ohne künstliche "
-                            "Wiederholung weitergereicht.";
-        else
-            accessMessage = "Kein geprüftes HID-Eingangsprofil gefunden. Ein verfügbarer evdev-Eingang ist "
-                            "nur ein eingeschränkter Fallback; "
-                            "konstantes Halten endet nach 250 ms ohne Achsenänderung.";
-        if (!access["pkexec_available"].toBool())
-            accessMessage +=
-                " Für die einmalige Rechte-Einrichtung fehlt pkexec (Polkit-Paket der Distribution).";
-        inputAccessInfo->setText(accessMessage);
-        auto d = s["driver"].toObject();
-        driverInfo->setText(QString("Anbindung: ") +
-                            (s["spacemouse_enabled"].toBool() ? "aktiviert" : "deaktiviert") + "\nBrücke: " +
-                            (d["fresh"].toBool()           ? "läuft"
-                             : s["direct_driver"].toBool() ? "gestoppt / kein aktueller Status"
-                                                           : "vorhandene Integration noch nicht übernommen") +
-                            (d["fresh"].toBool() ? "  ·  " + QString::number(d["clients"].toInt()) +
-                                                       " Fusion-Verbindung(en)\n" + text(d, "error", "")
-                                                 : ""));
+        const bool needsAccess = access["requires_setup"].toBool();
+        accessPanel->setVisible(needsAccess);
+        inputAccessInfo->setText(access["pkexec_available"].toBool()
+                                     ? "Raw device access required"
+                                     : "Raw access required · Polkit is missing");
+        inputAccessInfo->setToolTip(
+            "The receiver is detected, but direct HID read access is missing. "
+            "The evdev fallback interrupts a held deflection after 250 ms without axis changes. "
+            "Set up device access, approve the administrator prompt, then unplug and reconnect the receiver. "
+            "The helper installs only the identity-restricted uaccess rule; no root service is added.");
+
+        const auto driver = s["driver"].toObject();
+        const bool fresh = driver["fresh"].toBool();
+        QString bridge = fresh                         ? "Bridge online"
+                         : s["direct_driver"].toBool() ? "Bridge offline"
+                                                       : "Apply checkout to enable controls";
+        driverInfo->setText(QString(s["spacemouse_enabled"].toBool() ? "Enabled" : "Disabled") + "  ·  " +
+                            bridge);
+        if (fresh) {
+            deviceDetails << QString("Fusion clients: %1").arg(driver["clients"].toInt());
+            if (driver["error"].isString())
+                deviceDetails << "Error: " + text(driver, "error", "");
+            if (driver["warning"].isString())
+                deviceDetails << "Warning: " + text(driver, "warning", "");
+        }
+        hardwareInfo->setText(deviceDetails.isEmpty() ? "Connect the receiver and switch on the SpaceMouse."
+                                                      : deviceDetails.join("\n"));
+        spaceOverview->setText(fresh && driver["connected"].toBool()
+                                   ? (text(driver, "input_backend", "") == "hidraw"
+                                          ? "Connected · Direct HID"
+                                          : "Connected · evdev fallback")
+                               : detected.isEmpty() ? "No device detected"
+                               : needsAccess        ? "Device access required"
+                                                    : "Receiver detected");
+        overviewCamera->setText("Camera " + QString::number(s["camera"].toObject()["percent"].toInt(25)) +
+                                "%");
+
         if (!loaded) {
             if (repo->text().isEmpty())
                 repo->setText(text(r, "path", ""));
@@ -263,20 +420,22 @@ class Manager : public QMainWindow {
             prefix->setCurrentText(text(s, "prefix", "compatdata-exp-dx11"));
             proton->clear();
             for (const auto &entry : s["protons"].toArray()) {
-                auto p = entry.toObject();
-                proton->addItem(text(p, "name") + "  —  " + text(p, "path"), text(p, "path"));
-                if (text(p, "path") == text(s, "proton_path", "") || text(p, "name") == text(s, "proton", ""))
+                const auto entryObject = entry.toObject();
+                proton->addItem(text(entryObject, "name"), text(entryObject, "path"));
+                proton->setItemData(proton->count() - 1, text(entryObject, "path"), Qt::ToolTipRole);
+                if (text(entryObject, "path") == text(s, "proton_path", "") ||
+                    text(entryObject, "name") == text(s, "proton", ""))
                     proton->setCurrentIndex(proton->count() - 1);
             }
             withSpace->setChecked(s["spacemouse_installed"].toBool() || !present);
-            auto config = s["device_config"].toObject();
+            const auto config = s["device_config"].toObject();
             deadzone->setValue(config["deadzone"].toInt());
             for (int i = 0; i < 6; ++i) {
                 enabled[i]->setChecked(config["enabled"].toArray()[i].toBool());
                 inverted[i]->setChecked(config["inverted"].toArray()[i].toBool());
             }
             for (int i = 0; i < 2; ++i) {
-                int index = buttons[i]->findData(config["buttons"].toArray()[i].toString());
+                const int index = buttons[i]->findData(config["buttons"].toArray()[i].toString());
                 if (index >= 0)
                     buttons[i]->setCurrentIndex(index);
             }
@@ -292,6 +451,7 @@ class Manager : public QMainWindow {
             });
         }
     }
+
     void updateAvailability() {
         const bool running = last["running"].toBool();
         const auto r = last["repo"].toObject();
@@ -299,40 +459,429 @@ class Manager : public QMainWindow {
             QString reason;
             const QString action = widget->property("action").toString();
             if (busy)
-                reason = "Eine Aktion läuft bereits.";
+                reason = "Another action is running.";
             else if (action == "launch" && running)
-                reason = "Fusion läuft bereits.";
+                reason = "Fusion is already running.";
             else if (action == "launch" && !last["fusion"].isString())
-                reason = "Fusion ist noch nicht installiert.";
+                reason = "Fusion is not installed yet.";
             else if (running &&
                      (action == "update" || action == "install" || action == "patch" || action == "apply" ||
                       action == "profile" || action == "enable" || action == "disable"))
-                reason = "Fusion vor dieser Änderung vollständig schließen.";
+                reason = "Close Fusion before making this change.";
             else if ((action == "driver-start" || action == "driver-stop" || action == "enable" ||
                       action == "disable") &&
                      !last["direct_driver"].toBool())
-                reason = "Checkout zuerst anwenden. Die vorhandene ältere Treiberintegration bleibt bis "
-                         "dahin unverändert.";
+                reason =
+                    "Apply the current checkout first. The older driver integration will remain unchanged.";
             else if (action == "setup-access" &&
                      !last["input_access"].toObject()["pkexec_available"].toBool())
-                reason = "pkexec fehlt. Das Polkit-Paket der Distribution wird für die einmalige Freigabe "
-                         "benötigt.";
+                reason = "Polkit (pkexec) is required for the one-time device access setup.";
             else if (action == "setup-access" &&
                      !last["input_access"].toObject()["helper_available"].toBool())
-                reason = "Der feste Zugriffshelfer fehlt; bitte Manager bauen oder aktualisieren.";
+                reason = "The access helper is missing. Build or update the Manager first.";
             else if (action == "clone" && r["valid"].toBool())
-                reason = "Der ausgewählte Checkout ist bereits vorhanden.";
+                reason = "The selected checkout already exists.";
             else if ((action == "update" || action == "check" || action == "apply" || action == "install" ||
                       action == "patch") &&
                      !r["valid"].toBool())
-                reason = "Zuerst einen gültigen Checkout auswählen.";
+                reason = "Select a valid checkout first.";
             else if (action == "update" && r["dirty"].toBool())
-                reason = "Lokale Änderungen zuerst selbst sichern oder committen.";
+                reason = "Save or commit local changes before updating.";
             else if (action == "update" && (!r["upstream"].isString() || r["ahead"].toInt() > 0))
-                reason = "Kein eindeutiger Fast-Forward-Pfad zum Upstream.";
+                reason = "No unambiguous fast-forward update is available.";
             widget->setEnabled(reason.isEmpty());
             widget->setToolTip(reason);
         }
+    }
+
+    void buildOverview() {
+        QVBoxLayout *layout;
+        page("Overview",
+             "Manage Fusion and its Linux integration. Version and update information comes from "
+             "the selected installation and Git checkout. Autodesk's own updater manages Fusion itself.",
+             layout);
+        auto *fusion = new QFrame;
+        fusion->setObjectName("fusionPanel");
+        auto *fusionRow = new QHBoxLayout(fusion);
+        fusionRow->setContentsMargins(20, 19, 20, 19);
+        fusionRow->setSpacing(16);
+        auto *mark = label("F", "fusionMark");
+        mark->setFixedSize(42, 42);
+        mark->setAlignment(Qt::AlignCenter);
+        fusionRow->addWidget(mark);
+        auto *name = new QVBoxLayout;
+        name->setSpacing(4);
+        name->addWidget(label("Autodesk Fusion", "product"));
+        name->addWidget(subtitle);
+        fusionRow->addLayout(name, 1);
+        fusionRow->addWidget(headline);
+        fusionRow->addSpacing(8);
+        fusionRow->addWidget(actionButton("Launch Fusion", "launch", {}, true));
+        fusionRow->addWidget(actionButton("Refresh", "status"));
+        layout->addWidget(fusion);
+
+        auto *columns = new QHBoxLayout;
+        columns->setSpacing(16);
+        auto *runtime = new QVBoxLayout;
+        auto *fields = new QGridLayout;
+        field(fields, 0, "Integration", integrationVersion);
+        field(fields, 1, "Prefix", overviewPrefix);
+        field(fields, 2, "Proton", overviewProton);
+        runtime->addLayout(fields);
+        runtime->addStretch();
+        runtime->addWidget(details("Installation details", fusionInfo));
+        columns->addWidget(panel("Runtime",
+                                 "The prefix and Proton selection are preserved across updates. "
+                                 "Change them in Setup after closing Fusion. Expand installation details to "
+                                 "see the full executable path and revision.",
+                                 runtime),
+                           1);
+
+        auto *updates = new QVBoxLayout;
+        updates->setSpacing(8);
+        updates->addWidget(repoSummary);
+        updates->addWidget(repoBranch);
+        updates->addWidget(repoCheck);
+        auto *actions = new QHBoxLayout;
+        actions->addWidget(actionButton("Check", "check"));
+        actions->addWidget(actionButton("Update", "update", {}, true));
+        cloneButton = actionButton("Restore checkout", "clone");
+        actions->addWidget(cloneButton);
+        actions->addStretch();
+        updates->addSpacing(4);
+        updates->addLayout(actions);
+        updates->addStretch();
+        updates->addWidget(details("Repository details", repoInfo));
+        columns->addWidget(
+            panel("Updates",
+                  "Check fetches the configured remote. Update accepts only a fast-forward "
+                  "and runs the newly fetched installer. Local changes and divergent history are protected. "
+                  "The displayed comparison reflects the last fetch. Restore checkout recreates a missing "
+                  "repository without overwriting files.",
+                  updates),
+            1);
+        for (int i = 0; i < columns->count(); ++i)
+            columns->setAlignment(columns->itemAt(i)->widget(), Qt::AlignTop);
+        layout->addLayout(columns);
+
+        auto *device = new QVBoxLayout;
+        auto *deviceRow = new QHBoxLayout;
+        auto *summary = new QVBoxLayout;
+        summary->setSpacing(5);
+        summary->addWidget(spaceOverview);
+        summary->addWidget(overviewCamera);
+        deviceRow->addLayout(summary, 1);
+        auto *configure = new QPushButton("Configure");
+        connect(configure, &QPushButton::clicked, this, [this] { nav->setCurrentRow(1); });
+        deviceRow->addWidget(configure);
+        device->addLayout(deviceRow);
+        layout->addWidget(panel("SpaceMouse",
+                                "Device status comes from the real input bridge. Camera changes are queued "
+                                "for the next Fusion launch; input counts are preserved.",
+                                device));
+        layout->addStretch();
+    }
+
+    void buildSpaceMouse() {
+        QVBoxLayout *layout;
+        page("SpaceMouse",
+             "Direct HID preserves complete hardware reports without input scaling or synthetic repetition. "
+             "The explicitly limited evdev fallback may interrupt held motion after 250 ms without axis "
+             "changes. "
+             "Only the reviewed Universal Receiver profile is used for raw HID input.",
+             layout);
+        auto *connection = new QVBoxLayout;
+        connection->setSpacing(7);
+        connection->addWidget(deviceSummary);
+        connection->addWidget(inputStateInfo);
+        connection->addWidget(driverInfo);
+        auto *access = new QHBoxLayout(accessPanel);
+        accessPanel->setObjectName("accessPanel");
+        access->setContentsMargins(12, 10, 12, 10);
+        access->addWidget(inputAccessInfo, 1);
+        access->addWidget(
+            infoButton("Device access",
+                       "Set up device access is an explicit administrator action. "
+                       "A fixed helper adds only the USB 256f:c652 uaccess rule, then reloads udev rules. "
+                       "Unplug and reconnect the receiver afterwards. No root service or world-writable rule "
+                       "is installed. "
+                       "Missing raw access leaves only the limited evdev fallback."));
+        access->addWidget(actionButton("Set up device access", "setup-access", {}, true));
+        accessPanel->hide();
+        connection->addWidget(accessPanel);
+        auto *diagnostics = new QWidget;
+        auto *diagnosticLayout = new QVBoxLayout(diagnostics);
+        diagnosticLayout->setContentsMargins(0, 3, 0, 0);
+        diagnosticLayout->addWidget(hardwareInfo);
+        auto *driverActions = new QHBoxLayout;
+        for (const auto &entry : {qMakePair(QString("Start bridge"), QString("driver-start")),
+                                  qMakePair(QString("Stop bridge"), QString("driver-stop")),
+                                  qMakePair(QString("Enable"), QString("enable")),
+                                  qMakePair(QString("Disable"), QString("disable"))})
+            driverActions->addWidget(actionButton(entry.first, entry.second));
+        driverActions->addStretch();
+        diagnosticLayout->addLayout(driverActions);
+        connection->addWidget(details("Diagnostics & driver", diagnostics));
+        layout->addWidget(
+            panel("Connection",
+                  "Keyboard actions only work while Fusion has focus. "
+                  "A 250 ms gap in motion reports safely neutralizes the last nonzero input; battery and "
+                  "status reports "
+                  "do not extend that deadline. Driver enable/disable requires Fusion to be closed.",
+                  connection));
+
+        auto *columns = new QHBoxLayout;
+        columns->setSpacing(16);
+        auto *axes = new QVBoxLayout;
+        auto *grid = new QGridLayout;
+        grid->setHorizontalSpacing(18);
+        grid->setVerticalSpacing(9);
+        grid->addWidget(label("Axis", "muted"), 0, 0);
+        grid->addWidget(label("Value", "muted"), 0, 1, Qt::AlignRight);
+        grid->addWidget(label("Use", "muted"), 0, 2, Qt::AlignHCenter);
+        grid->addWidget(label("Invert", "muted"), 0, 3, Qt::AlignHCenter);
+        const QStringList names = {"X", "Y", "Z", "RX", "RY", "RZ"};
+        const QStringList descriptions = {"Pan left / right", "Pan up / down", "Zoom forward / back", "Tilt",
+                                          "Rotate",           "Roll"};
+        for (int i = 0; i < 6; ++i) {
+            auto *name = label(names[i]);
+            name->setToolTip(descriptions[i]);
+            live[i] = label("—", "value");
+            live[i]->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            live[i]->setMinimumWidth(47);
+            enabled[i] = new QCheckBox;
+            inverted[i] = new QCheckBox;
+            enabled[i]->setAccessibleName("Enable " + names[i]);
+            inverted[i]->setAccessibleName("Invert " + names[i]);
+            grid->addWidget(name, i + 1, 0);
+            grid->addWidget(live[i], i + 1, 1, Qt::AlignRight);
+            grid->addWidget(enabled[i], i + 1, 2, Qt::AlignHCenter);
+            grid->addWidget(inverted[i], i + 1, 3, Qt::AlignHCenter);
+            mutationControls << enabled[i] << inverted[i];
+        }
+        grid->setColumnStretch(0, 1);
+        axes->addLayout(grid);
+        axes->addStretch();
+        auto *deadzoneRow = new QHBoxLayout;
+        deadzone->setObjectName("deadzone");
+        deadzone->setButtonSymbols(QAbstractSpinBox::NoButtons);
+        deadzone->setRange(0, 100);
+        deadzone->setSuffix(" counts");
+        deadzone->setFixedWidth(108);
+        deadzoneRow->addWidget(label("Deadzone", "muted"));
+        deadzoneRow->addStretch();
+        deadzoneRow->addWidget(deadzone);
+        axes->addSpacing(8);
+        axes->addLayout(deadzoneRow);
+        columns->addWidget(
+            panel(
+                "Axes",
+                "Values are the mapped integer counts sent to Fusion. Default deadzone is zero. "
+                "Axis mapping is [X, −Z, −Y, RX, −RZ, −RY]. Enable or invert axes explicitly; there is no "
+                "smoothing, "
+                "input sensitivity scaling or batching. Save input applies both axes and button assignments.",
+                axes),
+            1);
+
+        auto *bindings = new QVBoxLayout;
+        bindings->setSpacing(12);
+        auto *form = new QFormLayout;
+        form->setHorizontalSpacing(14);
+        form->setVerticalSpacing(12);
+        for (int i = 0; i < 2; ++i) {
+            buttons[i] = new QComboBox;
+            buttons[i]->setObjectName(i == 0 ? "button-left" : "button-right");
+            for (const auto &entry :
+                 {qMakePair(QString("Cancel · Esc"), QString("ESC")),
+                  qMakePair(QString("Measure · I"), QString("I")), qMakePair(QString("F"), QString("F")),
+                  qMakePair(QString("Home"), QString("HOME")), qMakePair(QString("1"), QString("1")),
+                  qMakePair(QString("2"), QString("2")), qMakePair(QString("3"), QString("3")),
+                  qMakePair(QString("Native SDK button"), QString("sdk")),
+                  qMakePair(QString("No action"), QString("off"))})
+                buttons[i]->addItem(entry.first, entry.second);
+            form->addRow(i == 0 ? "Left" : "Right", buttons[i]);
+            mutationControls << buttons[i];
+        }
+        bindings->addLayout(form);
+        bindings->addWidget(buttonState);
+        auto *separator = new QFrame;
+        separator->setObjectName("separator");
+        separator->setFixedHeight(1);
+        bindings->addWidget(separator);
+        auto *cameraRow = new QHBoxLayout;
+        camera->setObjectName("camera");
+        camera->setButtonSymbols(QAbstractSpinBox::NoButtons);
+        camera->setRange(1, 100);
+        camera->setSuffix(" %");
+        camera->setFixedWidth(88);
+        cameraRow->addWidget(label("Camera speed"));
+        cameraRow->addStretch();
+        cameraRow->addWidget(camera);
+        cameraRow->addWidget(actionButton("Apply", "camera"));
+        bindings->addLayout(cameraRow);
+        cameraHint->setToolTip(
+            "Camera settings take effect on the next Fusion launch. The speed is applied after "
+            "input decoding, preserving hardware counts. Speeds below 25% require a supported Fusion "
+            "version.");
+        bindings->addWidget(cameraHint);
+        bindings->addStretch();
+        auto *save = new QHBoxLayout;
+        save->addStretch();
+        save->addWidget(actionButton("Save input", "settings", {}, true));
+        bindings->addLayout(save);
+        columns->addWidget(
+            panel(
+                "Buttons & camera",
+                "Keyboard actions are sent only to focused Fusion. Held keys are released "
+                "on focus loss or disconnect. Save input applies axis and button settings within one second. "
+                "Camera Apply queues the selected speed for the next launch; it does not modify a running "
+                "Fusion session.",
+                bindings),
+            1);
+        for (int i = 0; i < columns->count(); ++i)
+            columns->setAlignment(columns->itemAt(i)->widget(), Qt::AlignTop);
+        layout->addLayout(columns);
+        mutationControls << camera << deadzone;
+        layout->addStretch();
+    }
+
+    void buildSetup() {
+        QVBoxLayout *layout;
+        page("Setup",
+             "Install Fusion, adopt an existing installation, or apply the local checkout. "
+             "Close Fusion before changing installation files, its SDK integration, prefix or Proton. "
+             "Steam and a Proton version must already be installed.",
+             layout);
+        auto *runtime = new QVBoxLayout;
+        auto *form = new QFormLayout;
+        form->setHorizontalSpacing(20);
+        form->setVerticalSpacing(12);
+        prefix->setObjectName("prefix");
+        proton->setObjectName("proton");
+        form->addRow("Prefix", prefix);
+        form->addRow("Proton", proton);
+        runtime->addLayout(form);
+        auto *applyRow = new QHBoxLayout;
+        applyRow->addStretch();
+        applyRow->addWidget(actionButton("Apply runtime", "profile"));
+        runtime->addLayout(applyRow);
+        layout->addWidget(
+            panel("Runtime",
+                  "Select an existing Wine prefix and an installed Proton version. "
+                  "Their folders are preserved. Proton paths are available as item tooltips. A new "
+                  "installation may "
+                  "use a new prefix name; applying a runtime selection requires an existing prefix.",
+                  runtime));
+        mutationControls << prefix << proton;
+
+        auto *installation = new QVBoxLayout;
+        auto *installRow = new QHBoxLayout;
+        installRow->addWidget(actionButton("Install Fusion", "install", {}, true));
+        installRow->addWidget(actionButton("Adopt existing", "patch"));
+        installRow->addWidget(actionButton("Apply checkout", "apply"));
+        installRow->addStretch();
+        installation->addLayout(installRow);
+        installation->addWidget(withSpace);
+        auto *advanced = new QWidget;
+        auto *advancedLayout = new QVBoxLayout(advanced);
+        advancedLayout->setContentsMargins(0, 0, 0, 0);
+        advancedLayout->addWidget(label("Installer executable (optional)", "muted"));
+        advancedLayout->addWidget(pathRow(installer, "Download the official Autodesk installer", true));
+        installation->addWidget(details("Installer options", advanced));
+        layout->addWidget(panel("Installation",
+                                "Install Fusion requires a free installation folder. The official Autodesk "
+                                "installer is downloaded unless an executable is selected. Setup and sign-in "
+                                "open in their own window. "
+                                "Adopt existing configures an existing installation. Apply checkout deploys "
+                                "local files without a Git fetch. "
+                                "Replaced helpers are backed up under backups/updates; documents and the "
+                                "complete Wine prefix are not included in that backup.",
+                                installation));
+        mutationControls << withSpace;
+
+        auto *locations = new QVBoxLayout;
+        locations->addWidget(locationSummary);
+        auto *locationFields = new QWidget;
+        auto *locationLayout = new QVBoxLayout(locationFields);
+        locationLayout->setContentsMargins(0, 0, 0, 0);
+        locationLayout->setSpacing(8);
+        locationLayout->addWidget(label("Installation folder", "muted"));
+        locationLayout->addWidget(pathRow(target, "~/.local/share/autodesk-fusion"));
+        locationLayout->addWidget(label("Repository checkout", "muted"));
+        locationLayout->addWidget(pathRow(repo, "fusion-linux-dx11"));
+        locations->addWidget(details("Change folders", locationFields));
+        layout->addWidget(panel("Locations",
+                                "The selected installation and source checkout are used by every action. "
+                                "Choose an empty destination for a new installation. Existing files are "
+                                "never overwritten by repository cloning.",
+                                locations));
+        layout->addStretch();
+    }
+
+    void buildActivity() {
+        QVBoxLayout *layout;
+        page("Activity",
+             "Output from actions started in this window. Installation and update failures are shown here. "
+             "Fusion launch output is saved in logs/manager-launch.log in the selected installation.",
+             layout);
+        auto *actions = new QHBoxLayout;
+        auto *copy = new QPushButton("Copy output");
+        connect(copy, &QPushButton::clicked, this,
+                [this] { QApplication::clipboard()->setText(log->toPlainText()); });
+        actions->addWidget(copy);
+        auto *open = new QPushButton("Open log folder");
+        connect(open, &QPushButton::clicked, this,
+                [this] { QDesktopServices::openUrl(QUrl::fromLocalFile(target->text() + "/logs")); });
+        actions->addWidget(open);
+        actions->addStretch();
+        layout->addLayout(actions);
+        log->setReadOnly(true);
+        log->setMaximumBlockCount(3000);
+        log->setPlaceholderText("No activity yet.");
+        log->setMinimumHeight(340);
+        layout->addWidget(log, 1);
+    }
+
+    void readLiveState() {
+        const QString runtime =
+            qEnvironmentVariable("XDG_RUNTIME_DIR", QString("/run/user/%1").arg(getuid()));
+        QFile file(runtime + "/autodesk-fusion-spacemouse/status.json");
+        QJsonObject state;
+        if (file.open(QIODevice::ReadOnly))
+            state = QJsonDocument::fromJson(file.readAll()).object();
+        const double age = QDateTime::currentMSecsSinceEpoch() / 1000. - state["timestamp"].toDouble();
+        const bool fresh = state["timestamp"].isDouble() && age >= 0 && age <= 3;
+        QString inputState = "Input offline";
+        if (fresh) {
+            inputState = state["input_backend"].toString() == "hidraw"  ? "Direct HID"
+                         : state["input_backend"].toString() == "evdev" ? "Limited evdev fallback"
+                                                                        : "No input connected";
+            if (state["motion_watchdog"].toBool()) {
+                inputState += "  ·  Safety stop";
+                inputStateInfo->setToolTip("Input was neutralized after 250 ms without a motion report. "
+                                           "Battery and status reports do not extend the safety deadline.");
+            } else {
+                inputStateInfo->setToolTip(
+                    "The current input source reported by the bridge. HID reports are forwarded "
+                    "without synthetic repetition. The evdev fallback cannot reproduce continuously held "
+                    "motion reliably.");
+            }
+            const auto telemetry = state["telemetry"].toObject();
+            if (telemetry["battery_strength"].isDouble())
+                inputState +=
+                    "  ·  Battery " + QString::number(telemetry["battery_strength"].toInt()) + "/100";
+        }
+        inputStateInfo->setText(inputState);
+        const auto axes = state["axes"].toArray();
+        for (int i = 0; i < 6; ++i)
+            live[i]->setText(fresh && i < axes.size() ? QString::number(axes[i].toInt()) : "—");
+        const auto buttonValues = state["buttons"].toArray();
+        buttonState->setText(
+            fresh ? QString("L ") +
+                        (buttonValues.size() > 0 && buttonValues[0].toBool() ? "pressed" : "released") +
+                        "  ·  R " +
+                        (buttonValues.size() > 1 && buttonValues[1].toBool() ? "pressed" : "released")
+                  : "Input offline");
     }
 
   public:
@@ -340,18 +889,21 @@ class Manager : public QMainWindow {
             const QString &capture, bool smokeTest)
         : backend(backendPath), screenshot(capture), smoke(smokeTest) {
         setWindowTitle("Fusion Manager");
-        resize(1130, 850);
+        resize(1120, 800);
         setMinimumSize(880, 640);
         prefix->setEditable(true);
+        target->setText(appPath);
+        repo->setText(repoPath);
         for (auto *edit : {target, repo})
             connect(edit, &QLineEdit::editingFinished, this, [this] {
                 loaded = false;
                 requestStatus();
             });
-        target->setText(appPath);
-        repo->setText(repoPath);
         proton->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         proton->setMinimumContentsLength(18);
+        for (auto *widget : {fusionInfo, repoInfo, hardwareInfo})
+            detailLabel(widget);
+
         auto *root = new QWidget;
         auto *shell = new QHBoxLayout(root);
         shell->setContentsMargins(0, 0, 0, 0);
@@ -359,216 +911,56 @@ class Manager : public QMainWindow {
         setCentralWidget(root);
         auto *rail = new QWidget;
         rail->setObjectName("rail");
-        rail->setFixedWidth(205);
-        auto *rl = new QVBoxLayout(rail);
-        rl->setContentsMargins(20, 28, 16, 20);
-        rl->addWidget(label("FUSION\nMANAGER", "brand"));
-        rl->addSpacing(22);
-        nav->addItems({"Übersicht", "SpaceMouse", "Einrichtung", "Protokoll"});
+        rail->setFixedWidth(188);
+        auto *railLayout = new QVBoxLayout(rail);
+        railLayout->setContentsMargins(16, 23, 16, 18);
+        railLayout->setSpacing(18);
+        auto *brand = new QHBoxLayout;
+        brand->setSpacing(10);
+        auto *mark = label("F", "brandMark");
+        mark->setAlignment(Qt::AlignCenter);
+        mark->setFixedSize(30, 32);
+        brand->addWidget(mark);
+        brand->addWidget(label("Fusion\nManager", "brand"));
+        brand->addStretch();
+        railLayout->addLayout(brand);
+        nav->setObjectName("navigation");
+        const QStringList names = {"Overview", "SpaceMouse", "Setup", "Activity"};
+        for (int i = 0; i < names.size(); ++i) {
+            auto *item = new QListWidgetItem(navigationIcon(i), names[i]);
+            item->setSizeHint(QSize(150, 42));
+            nav->addItem(item);
+        }
         nav->setFrameShape(QFrame::NoFrame);
-        nav->setSpacing(6);
-        rl->addWidget(nav, 1);
-        rl->addWidget(label("Fusion Manager 1.2.0\nFür deinen Linux-Arbeitsplatz", "railnote"));
+        nav->setIconSize(QSize(20, 20));
+        nav->setSpacing(4);
+        nav->setFocusPolicy(Qt::StrongFocus);
+        nav->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        railLayout->addWidget(nav, 1);
+        railLayout->addWidget(label("v1.2.0", "railnote"));
         shell->addWidget(rail);
-        auto *right = new QWidget;
-        auto *rightLayout = new QVBoxLayout(right);
-        rightLayout->setContentsMargins(0, 0, 0, 0);
-        rightLayout->setSpacing(0);
-        rightLayout->addWidget(pages, 1);
+        auto *workspace = new QWidget;
+        workspace->setObjectName("workspace");
+        auto *workspaceLayout = new QVBoxLayout(workspace);
+        workspaceLayout->setContentsMargins(0, 0, 0, 0);
+        workspaceLayout->setSpacing(0);
+        workspaceLayout->addWidget(pages, 1);
         auto *footer = new QWidget;
         footer->setObjectName("footer");
-        auto *fl = new QHBoxLayout(footer);
-        fl->setContentsMargins(28, 10, 28, 10);
-        fl->addWidget(result, 1);
-        progress->setFixedSize(130, 7);
+        auto *footerLayout = new QHBoxLayout(footer);
+        footerLayout->setContentsMargins(26, 9, 26, 9);
+        footerLayout->addWidget(result, 1);
+        progress->setFixedSize(110, 5);
         progress->setRange(0, 0);
         progress->hide();
-        fl->addWidget(progress);
-        rightLayout->addWidget(footer);
-        shell->addWidget(right, 1);
-        QVBoxLayout *v;
-        page("Dein Arbeitsplatz", "Fusion, Linux-Integration und Hardware an einem Ort verwalten.", v);
-        auto *hero = new QVBoxLayout;
-        hero->addWidget(headline);
-        hero->addWidget(subtitle);
-        auto *heroActions = new QHBoxLayout;
-        heroActions->addWidget(actionButton("Fusion starten", "launch", {}, true));
-        heroActions->addWidget(actionButton("Status aktualisieren", "status"));
-        heroActions->addStretch();
-        hero->addLayout(heroActions);
-        v->addWidget(card("", hero));
-        auto *info = new QVBoxLayout;
-        info->addWidget(fusionInfo);
-        v->addWidget(card("Installation", info));
-        auto *git = new QVBoxLayout;
-        git->addWidget(repoInfo);
-        auto *gitActions = new QHBoxLayout;
-        gitActions->addWidget(actionButton("Updates prüfen", "check"));
-        gitActions->addWidget(actionButton("Repository laden", "clone"));
-        gitActions->addWidget(actionButton("Git-Update installieren", "update", {}, true));
-        gitActions->addStretch();
-        git->addLayout(gitActions);
-        v->addWidget(card("Repository & Updates", git));
-        v->addWidget(label("Git-Updates verwenden Fast-Forward und bewahren lokale Änderungen. Während "
-                           "Fusion läuft, sind Änderungen an Installation, Prefix und Proton gesperrt.",
-                           "muted"));
-        v->addStretch();
-        page("SpaceMouse",
-             "Volle Hardware-Auflösung. Native Achsenkonvention. Keine Eingabeskalierung oder Glättung.", v);
-        auto *device = new QVBoxLayout;
-        device->addWidget(deviceSummary);
-        auto *details = new QToolButton;
-        details->setText("Technische Gerätedaten");
-        details->setCheckable(true);
-        details->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        details->setArrowType(Qt::RightArrow);
-        hardwareInfo->hide();
-        connect(details, &QToolButton::toggled, this, [this, details](bool visible) {
-            hardwareInfo->setVisible(visible);
-            details->setArrowType(visible ? Qt::DownArrow : Qt::RightArrow);
-        });
-        device->addWidget(details, 0, Qt::AlignLeft);
-        device->addWidget(hardwareInfo);
-        device->addWidget(driverInfo);
-        device->addWidget(inputStateInfo);
-        device->addWidget(inputAccessInfo);
-        device->addWidget(actionButton("Gerätezugriff einrichten", "setup-access", {}, true));
-        device->addWidget(label(
-            "Diese ausdrückliche Aktion öffnet die Administratorfreigabe für eine enge Gerätezugriffsregel. "
-            "Danach den Universal Receiver abziehen und neu anschließen.",
-            "muted"));
-        auto *da = new QHBoxLayout;
-        for (const auto &pair : {qMakePair(QString("Brücke starten"), QString("driver-start")),
-                                 qMakePair(QString("Brücke stoppen"), QString("driver-stop")),
-                                 qMakePair(QString("Aktivieren"), QString("enable")),
-                                 qMakePair(QString("Deaktivieren"), QString("disable"))})
-            da->addWidget(actionButton(pair.first, pair.second));
-        device->addLayout(da);
-        v->addWidget(card("Gerät & Verbindung", device));
-        auto *axisLayout = new QVBoxLayout;
-        auto *grid = new QGridLayout;
-        QStringList names = {"X · links / rechts", "Y · hoch / runter", "Z · vor / zurück",
-                             "RX · kippen",        "RY · drehen",       "RZ · rollen"};
-        grid->addWidget(label("Achse"), 0, 0);
-        grid->addWidget(label("Eingabe"), 0, 1);
-        grid->addWidget(label("Aktiv"), 0, 2);
-        grid->addWidget(label("Umkehren"), 0, 3);
-        for (int i = 0; i < 6; ++i) {
-            live[i] = label("—");
-            live[i]->setProperty("kind", "value");
-            enabled[i] = new QCheckBox;
-            inverted[i] = new QCheckBox;
-            grid->addWidget(label(names[i]), i + 1, 0);
-            grid->addWidget(live[i], i + 1, 1);
-            grid->addWidget(enabled[i], i + 1, 2);
-            grid->addWidget(inverted[i], i + 1, 3);
-            mutationControls << enabled[i] << inverted[i];
-        }
-        axisLayout->addLayout(grid);
-        auto *dz = new QHBoxLayout;
-        deadzone->setRange(0, 100);
-        deadzone->setSuffix(" Counts");
-        dz->addWidget(label("Deadzone"));
-        dz->addWidget(deadzone);
-        dz->addStretch();
-        axisLayout->addLayout(dz);
-        axisLayout->addWidget(label("Standard: 0. Kleinste Hardwarecounts bleiben erhalten. Die Werte zeigen "
-                                    "die an Fusion übergebenen Achsen.",
-                                    "muted"));
-        v->addWidget(card("Achsen · Live", axisLayout));
-        auto *binding = new QVBoxLayout;
-        auto *bf = new QFormLayout;
-        for (int i = 0; i < 2; ++i) {
-            buttons[i] = new QComboBox;
-            for (const auto &pair :
-                 {qMakePair(QString("Abbrechen · Esc"), QString("ESC")),
-                  qMakePair(QString("Messen · I"), QString("I")),
-                  qMakePair(QString("Taste F"), QString("F")),
-                  qMakePair(QString("Home"), QString("HOME")), qMakePair(QString("Taste 1"), QString("1")),
-                  qMakePair(QString("Taste 2"), QString("2")), qMakePair(QString("Taste 3"), QString("3")),
-                  qMakePair(QString("Nativer SDK-Button"), QString("sdk")),
-                  qMakePair(QString("Keine Aktion"), QString("off"))})
-                buttons[i]->addItem(pair.first, pair.second);
-            bf->addRow(i == 0 ? "Linke Taste" : "Rechte Taste", buttons[i]);
-            mutationControls << buttons[i];
-        }
-        binding->addLayout(bf);
-        binding->addWidget(buttonState);
-        binding->addWidget(label("Tastaturaktionen gelten nur bei Fusion-Fokus. Tasten werden bei "
-                                 "Fokusverlust und Trennung freigegeben.",
-                                 "muted"));
-        binding->addWidget(actionButton("Achsen & Tasten speichern", "settings", {}, true));
-        v->addWidget(card("Tasten", binding));
-        auto *speed = new QVBoxLayout;
-        auto *speedRow = new QHBoxLayout;
-        camera->setRange(1, 100);
-        camera->setSuffix(" %");
-        speedRow->addWidget(label("Kamerageschwindigkeit"));
-        speedRow->addWidget(camera);
-        speedRow->addWidget(actionButton("Für nächsten Start speichern", "camera"));
-        speedRow->addStretch();
-        speed->addLayout(speedRow);
-        speed->addWidget(cameraHint);
-        speed->addWidget(
-            label("Die Geschwindigkeit wird nach der Eingabe in Fusion angepasst. Die Hardwarewerte werden "
-                  "nicht gerundet. Werte unter 25 % benötigen eine unterstützte Fusion-Version.",
-                  "muted"));
-        v->addWidget(card("Kamera", speed));
-        v->addStretch();
-        mutationControls << camera << deadzone;
-        page("Einrichtung",
-             "Bestehende Installation übernehmen, neu installieren oder den lokalen Repo-Stand anwenden.", v);
-        auto *paths = new QVBoxLayout;
-        paths->addWidget(label("Installationsordner"));
-        paths->addWidget(pathRow(target, "~/.local/share/autodesk-fusion"));
-        paths->addWidget(label("Lokaler Git-Checkout"));
-        paths->addWidget(pathRow(repo, "fusion-linux-dx11"));
-        v->addWidget(card("Orte", paths));
-        auto *profile = new QVBoxLayout;
-        auto *pf = new QFormLayout;
-        pf->addRow("Aktives Prefix", prefix);
-        pf->addRow("Installiertes Proton", proton);
-        profile->addLayout(pf);
-        profile->addWidget(actionButton("Prefix & Proton übernehmen", "profile"));
-        profile->addWidget(label("Bestehende Prefix-Ordner bleiben erhalten. Proton wird aus deinen Steam- "
-                                 "und benutzerdefinierten Kompatibilitätstools gewählt.",
-                                 "muted"));
-        v->addWidget(card("Laufzeit", profile));
-        mutationControls << prefix << proton;
-        auto *setup = new QVBoxLayout;
-        setup->addWidget(withSpace);
-        setup->addWidget(label(
-            "Autodesk-Installer (optional). Ohne Datei wird der offizielle Installer geladen.", "muted"));
-        setup->addWidget(pathRow(installer, "Fusion360installer.exe", true));
-        auto *installActions = new QHBoxLayout;
-        installActions->addWidget(actionButton("Neu installieren", "install", {}, true));
-        installActions->addWidget(actionButton("Vorhandene Installation einrichten", "patch"));
-        setup->addLayout(installActions);
-        setup->addWidget(actionButton("Aktuellen Checkout anwenden", "apply"));
-        setup->addWidget(
-            label("Eine Neuinstallation verwendet einen freien Installationsordner. Autodesk-Setup und "
-                  "Anmeldung laufen in einem eigenen Fenster. Der Fortschritt steht im Protokoll. Updates "
-                  "sichern ersetzte Helferdateien unter backups/updates.",
-                  "muted"));
-        v->addWidget(card("Installation & Reparatur", setup));
-        v->addStretch();
-        mutationControls << withSpace;
-        page("Protokoll", "Ausgaben der gestarteten Aktionen und genaue Fehlermeldungen.", v);
-        log->setReadOnly(true);
-        log->setMaximumBlockCount(3000);
-        log->setMinimumHeight(340);
-        v->addWidget(log, 1);
-        auto *logButtons = new QHBoxLayout;
-        auto *copy = new QPushButton("Protokoll kopieren");
-        connect(copy, &QPushButton::clicked, this,
-                [this] { QApplication::clipboard()->setText(log->toPlainText()); });
-        logButtons->addWidget(copy);
-        auto *open = new QPushButton("Logordner öffnen");
-        connect(open, &QPushButton::clicked, this,
-                [this] { QDesktopServices::openUrl(QUrl::fromLocalFile(target->text() + "/logs")); });
-        logButtons->addWidget(open);
-        logButtons->addStretch();
-        v->addLayout(logButtons);
+        footerLayout->addWidget(progress);
+        workspaceLayout->addWidget(footer);
+        shell->addWidget(workspace, 1);
+
+        buildOverview();
+        buildSpaceMouse();
+        buildSetup();
+        buildActivity();
         connect(nav, &QListWidget::currentRowChanged, pages, &QStackedWidget::setCurrentIndex);
         nav->setCurrentRow(0);
         connect(statusProc, &QProcess::readyReadStandardOutput, this,
@@ -576,18 +968,18 @@ class Manager : public QMainWindow {
         connect(statusProc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
                 [this](int code, QProcess::ExitStatus) {
                     QJsonParseError error;
-                    auto doc = QJsonDocument::fromJson(statusBytes, &error);
-                    if (code == 0 && error.error == QJsonParseError::NoError && doc.isObject())
-                        updateStatus(doc.object());
+                    const auto document = QJsonDocument::fromJson(statusBytes, &error);
+                    if (code == 0 && error.error == QJsonParseError::NoError && document.isObject())
+                        updateStatus(document.object());
                     else {
-                        result->setText("Status konnte nicht gelesen werden.");
+                        result->setText("Unable to read status · See Activity");
                         log->appendPlainText(QString::fromUtf8(statusProc->readAllStandardError()));
                         if (smoke || !screenshot.isEmpty())
                             QApplication::exit(1);
                     }
                 });
         connect(statusProc, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
-            result->setText("Python 3 konnte nicht gestartet werden.");
+            result->setText("Unable to start Python 3");
             if (smoke || !screenshot.isEmpty())
                 QApplication::exit(1);
         });
@@ -602,11 +994,11 @@ class Manager : public QMainWindow {
                     updateAvailability();
                     progress->hide();
                     result->setText(code == 0 && state == QProcess::NormalExit
-                                        ? "Aktion abgeschlossen"
-                                        : "Aktion fehlgeschlagen · Details im Protokoll");
+                                        ? "Completed"
+                                        : "Action failed · See Activity");
                     if (code == 0 && currentAction == "setup-access")
-                        result->setText("Gerätezugriff vorbereitet · Universal Receiver neu anschließen");
-                    log->appendPlainText("\nExit-Code: " + QString::number(code));
+                        result->setText("Device access prepared · Reconnect the receiver");
+                    log->appendPlainText("\nExit code: " + QString::number(code));
                     loaded = false;
                     requestStatus();
                     if (code != 0)
@@ -622,90 +1014,116 @@ class Manager : public QMainWindow {
         });
         connect(&refresh, &QTimer::timeout, this, [this] { requestStatus(); });
         refresh.start(5000);
-        connect(&liveRefresh, &QTimer::timeout, this, [this] {
-            QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR", QString("/run/user/%1").arg(getuid()));
-            QFile file(runtime + "/autodesk-fusion-spacemouse/status.json");
-            QJsonObject state;
-            if (file.open(QIODevice::ReadOnly))
-                state = QJsonDocument::fromJson(file.readAll()).object();
-            const bool fresh =
-                state["timestamp"].isDouble() &&
-                QDateTime::currentMSecsSinceEpoch() / 1000. - state["timestamp"].toDouble() >= 0 &&
-                QDateTime::currentMSecsSinceEpoch() / 1000. - state["timestamp"].toDouble() <= 3;
-            QString inputState = "Kein aktueller Eingangsstatus";
-            if (fresh) {
-                inputState = state["input_backend"].toString() == "hidraw" ? "Aktiver Eingang: direktes HID"
-                             : state["input_backend"].toString() == "evdev"
-                                 ? "Aktiver Eingang: eingeschränkter evdev-Fallback"
-                                 : "Kein Eingang verbunden";
-                if (state["motion_watchdog"].toBool())
-                    inputState += " · Sicherheitsstopp nach 250 ms ohne Bewegungsreport";
-                const auto telemetry = state["telemetry"].toObject();
-                if (telemetry["battery_strength"].isDouble())
-                    inputState +=
-                        " · Batteriestärke: " + QString::number(telemetry["battery_strength"].toInt()) +
-                        "/100";
-            }
-            inputStateInfo->setText(inputState);
-            const auto axes = state["axes"].toArray();
-            for (int i = 0; i < 6; ++i)
-                live[i]->setText(fresh && i < axes.size() ? QString::number(axes[i].toInt()) : "—");
-            const auto b = state["buttons"].toArray();
-            buttonState->setText(
-                fresh ? QString("Links: ") + (b.size() > 0 && b[0].toBool() ? "gedrückt" : "frei") +
-                            "   ·   Rechts: " + (b.size() > 1 && b[1].toBool() ? "gedrückt" : "frei")
-                      : "Kein aktueller Eingabestatus");
-        });
+        connect(&liveRefresh, &QTimer::timeout, this, [this] { readLiveState(); });
         liveRefresh.start(100);
         QTimer::singleShot(0, this, [this] { requestStatus(); });
     }
+
     void selectPage(int index) { nav->setCurrentRow(index); }
+
     void closeEvent(QCloseEvent *event) override {
         if (busy) {
-            QMessageBox::information(
-                this, "Aktion läuft",
-                "Die laufende Aktion muss zuerst abgeschlossen werden. Details im Protokoll.");
+            QMessageBox::information(this, "Action in progress",
+                                     "Wait for the current action to finish. See Activity for progress.");
             event->ignore();
             return;
         }
         event->accept();
     }
 };
+
 int main(int argc, char **argv) {
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc, argv);
     app.setApplicationName("Fusion Manager");
     app.setOrganizationName("fusion-linux-dx11");
+    QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
     QCommandLineParser parser;
-    parser.setApplicationDescription("Native Verwaltung für Fusion unter Linux und SpaceMouse");
+    parser.setApplicationDescription("Native Fusion and SpaceMouse manager for Linux");
     parser.addHelpOption();
-    parser.addOption({"backend", "Python-Backend", "path"});
+    parser.addOption({"backend", "Python backend", "path"});
     parser.addOption(
         {{"target", "app-dir"},
-         "Installationsordner",
+         "Installation folder",
          "path",
          QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/autodesk-fusion"});
-    parser.addOption({"repo", "Git-Checkout", "path"});
-    parser.addOption({"screenshot", "Fenster als PNG speichern und beenden", "path"});
-    parser.addOption({"smoke-test", "Status lesend prüfen und beenden"});
-    parser.addOption({"page", "Anfangsseite: overview, spacemouse, setup, log", "name", "overview"});
-    parser.addOption({"size", "Fenstergröße für Screenshots, z.B. 1130x1200", "size"});
+    parser.addOption({"repo", "Git checkout", "path"});
+    parser.addOption({"screenshot", "Save the window as a PNG and exit", "path"});
+    parser.addOption({"smoke-test", "Read status and exit without changing the installation"});
+    parser.addOption({"page", "Initial page: overview, spacemouse, setup, log", "name", "overview"});
+    parser.addOption({"size", "Window size, for example 1130x1200", "size"});
     parser.process(app);
     if (parser.value("backend").isEmpty()) {
-        qCritical("--backend PATH fehlt. manager/run.sh oder installierten Manager-Starter verwenden.");
+        qCritical("--backend PATH is required. Use manager/run.sh or the installed Manager launcher.");
         return 2;
     }
     app.setStyle("Fusion");
     app.setFont(QFont("Sans Serif", 10));
+    QPalette palette;
+    palette.setColor(QPalette::Window, QColor("#202938"));
+    palette.setColor(QPalette::WindowText, QColor("#e1e7ef"));
+    palette.setColor(QPalette::Base, QColor("#18212d"));
+    palette.setColor(QPalette::AlternateBase, QColor("#283446"));
+    palette.setColor(QPalette::Text, QColor("#e1e7ef"));
+    palette.setColor(QPalette::Button, QColor("#2e3b4e"));
+    palette.setColor(QPalette::ButtonText, QColor("#e1e7ef"));
+    palette.setColor(QPalette::Highlight, QColor("#367fc3"));
+    palette.setColor(QPalette::HighlightedText, Qt::white);
+    palette.setColor(QPalette::ToolTipBase, QColor("#334259"));
+    palette.setColor(QPalette::ToolTipText, QColor("#f0f3f8"));
+    palette.setColor(QPalette::Disabled, QPalette::Text, QColor("#738095"));
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor("#738095"));
+    app.setPalette(palette);
     app.setStyleSheet(R"(
-      QMainWindow, QScrollArea, QScrollArea > QWidget > QWidget {background:#f3f6fa;color:#1e293b;}
-      QWidget {color:#243449;} QLabel {background:transparent;} QLabel[kind="title"] {font-size:27px;font-weight:700;color:#142539;} QLabel[kind="hero"] {font-size:25px;font-weight:700;color:#123b55;}
-      QLabel[kind="warning"] {color:#8a570d;font-weight:600;} QLabel[kind="muted"] {color:#62748a;font-size:12px;} QLabel[kind="value"] {font-family:monospace;font-weight:700;color:#087f8c;}
-      #rail {background:#10293d;} #rail QLabel {color:#e5f3f8;} #rail QLabel[kind="brand"] {font-size:24px;font-weight:800;letter-spacing:2px;} #rail QLabel[kind="railnote"] {color:#96b2c3;font-size:11px;}
-      #rail QListWidget {background:transparent;color:#bdd0df;outline:0;border:0;font-size:14px;} #rail QListWidget::item {padding:13px 10px;border-radius:8px;} #rail QListWidget::item:selected {background:#1a4860;color:white;}
-      QGroupBox {background:white;border:1px solid #dce4ed;border-radius:11px;margin-top:10px;padding:17px 16px 14px;font-weight:600;} QGroupBox::title {subcontrol-origin:margin;left:17px;padding:0 6px;color:#375168;}
-      QPushButton {background:#edf3f8;border:1px solid #d7e2eb;border-radius:7px;padding:9px 12px;font-weight:600;} QPushButton:hover {background:#dfebf3;} QPushButton[primary="true"] {background:#087f8c;color:white;border-color:#087f8c;} QPushButton[primary="true"]:hover {background:#056b77;} QPushButton:disabled {color:#98a5b3;background:#edf0f4;}
-      QLineEdit,QComboBox,QSpinBox {background:white;border:1px solid #cfdae5;border-radius:6px;padding:7px;min-height:21px;} QCheckBox {spacing:8px;font-weight:400;} QPlainTextEdit {background:#10293d;color:#d3e8ef;border:0;border-radius:9px;padding:12px;font-family:monospace;font-size:12px;}
-      #footer {background:white;border-top:1px solid #dce4ed;} QProgressBar {background:#e3edf1;border:0;border-radius:3px;} QProgressBar::chunk {background:#087f8c;}
+        QWidget { color:#e1e7ef; }
+        QMainWindow, #workspace, #page, QScrollArea, QScrollArea > QWidget > QWidget { background:#202938; }
+        QLabel { background:transparent; }
+        QLabel[kind="title"] { font-size:23px; font-weight:600; color:#f0f3f7; }
+        QLabel[kind="product"] { font-size:19px; font-weight:600; color:#f0f3f7; }
+        QLabel[kind="section"] { font-size:13px; font-weight:600; color:#dbe4f0; }
+        QLabel[kind="summary"] { font-size:15px; font-weight:600; color:#e1e8f2; }
+        QLabel[kind="muted"], QLabel[kind="detail"] { color:#a6b3c5; font-size:12px; }
+        QLabel[kind="detail"] { line-height:1.4; }
+        QLabel[kind="warning"], QLabel[tone="warning"] { color:#edb472; }
+        QLabel[kind="value"] { color:#8fc2ef; font-family:monospace; font-size:12px; font-weight:600; }
+        QLabel[kind="badge"] { background:#303c4c; border-radius:4px; padding:5px 9px; color:#b4c2d3; font-size:12px; }
+        QLabel[kind="badge"][tone="good"] { background:#263f3d; color:#a9d5be; }
+        QLabel[kind="fusionMark"] { background:#df7932; color:#fff3e8; font-size:27px; font-weight:700; border-radius:6px; }
+        #rail { background:#19212d; border-right:1px solid #313d4f; }
+        QLabel[kind="brandMark"] { color:#f29248; font-size:30px; font-weight:700; }
+        QLabel[kind="brand"] { color:#e7edf5; font-size:15px; font-weight:600; }
+        QLabel[kind="railnote"] { color:#748399; font-size:11px; padding-left:10px; }
+        #navigation { background:transparent; outline:0; border:0; }
+        #navigation::item { color:#aebcd0; padding:11px 10px; border-left:2px solid transparent; border-radius:4px; }
+        #navigation::item:hover { background:#253145; }
+        #navigation::item:selected { background:#2b394e; color:#f0f4f9; border-left-color:#e88a42; }
+        #panel, #fusionPanel { background:#273345; border:1px solid #3a4659; border-radius:6px; }
+        #accessPanel { background:#393b3e; border:1px solid #60513e; border-radius:4px; }
+        #separator { background:#3a4659; border:0; }
+        QPushButton { background:#34435a; border:1px solid #4b5c74; border-radius:4px; padding:7px 12px; font-weight:500; }
+        QPushButton:hover { background:#40526c; border-color:#637894; }
+        QPushButton:pressed { background:#2a3b54; }
+        QPushButton[primary="true"] { background:#397fbf; border-color:#478dca; color:#fff; }
+        QPushButton[primary="true"]:hover { background:#498fce; }
+        QPushButton:disabled, QPushButton[primary="true"]:disabled { color:#77879c; background:#2c3749; border-color:#3b485d; }
+        QToolButton { color:#a4b6cd; background:transparent; border:0; padding:3px; }
+        QToolButton:hover { color:#e5edf7; background:#35465e; border-radius:3px; }
+        QToolButton#infoButton { color:#8ea2bc; border:1px solid #53647c; border-radius:10px; font-size:12px; font-style:italic; padding:0; }
+        QToolButton#disclosure { color:#a2b3ca; font-size:12px; }
+        QLineEdit, QComboBox, QSpinBox { background:#1c2736; border:1px solid #526179; border-radius:4px; padding:6px 8px; min-height:20px; selection-background-color:#397fbf; }
+        QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border-color:#70a4d2; }
+        QComboBox QAbstractItemView { background:#263448; color:#e1e7ef; selection-background-color:#3d628c; border:1px solid #53647c; outline:0; }
+        QCheckBox { spacing:8px; }
+        QCheckBox::indicator { width:15px; height:15px; }
+        QPlainTextEdit { background:#18212d; color:#c7d4e7; border:1px solid #3b485d; border-radius:5px; padding:14px; font-family:monospace; font-size:12px; }
+        QToolTip { background:#334259; color:#f0f3f8; border:1px solid #60718a; padding:7px; }
+        QScrollBar:vertical { background:transparent; width:9px; margin:2px; }
+        QScrollBar::handle:vertical { background:#495b72; border-radius:3px; min-height:28px; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background:none; }
+        #footer { background:#1b2431; border-top:1px solid #364254; }
+        QProgressBar { background:#29364a; border:0; border-radius:2px; }
+        QProgressBar::chunk { background:#5d9bd0; }
     )");
     Manager window(parser.value("backend"), parser.value("target"), parser.value("repo"),
                    parser.value("screenshot"), parser.isSet("smoke-test"));

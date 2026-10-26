@@ -33,7 +33,7 @@ def main():
     app = Path(__file__).resolve().parent.parent
     fusion = args.fusion.resolve()
     if fusion.name != "Fusion360.exe" or not fusion.is_file() or not fusion.is_relative_to(app):
-        raise SystemExit("Ungültiger Fusion-Installationspfad")
+        raise SystemExit("Invalid Fusion installation path")
     source = app / "spacemouse/siappdll.dll"
     target = fusion.parent / "siappdll.dll"
     backup = app / "spacemouse/backups" / fusion.parent.name
@@ -45,12 +45,12 @@ def main():
         if not state or current == state.get("original_sha256"):
             return
         if fusion_running():
-            raise SystemExit("Bitte Fusion vor der Wiederherstellung der DLL schließen.")
+            raise SystemExit("Close Fusion before restoring the DLL.")
         if current != state.get("installed_sha256"):
-            raise SystemExit("DLL wurde zwischenzeitlich geändert; Wiederherstellung abgebrochen.")
+            raise SystemExit("The DLL changed. Restore cancelled.")
         if state.get("original_sha256"):
             if not original.exists() or digest(original) != state["original_sha256"]:
-                raise SystemExit("Die gesicherte Original-DLL fehlt oder wurde geändert.")
+                raise SystemExit("The original DLL backup is missing or changed.")
             atomic_write(target, original.read_bytes())
         else:
             target.unlink()
@@ -59,11 +59,11 @@ def main():
     if current == expected:
         return
     if fusion_running():
-        raise SystemExit("Bitte Fusion vor dem Aktualisieren der SpaceMouse-DLL schließen.")
+        raise SystemExit("Close Fusion before updating the SpaceMouse DLL.")
     backup.mkdir(parents=True, exist_ok=True)
     if current is not None and current != state.get("installed_sha256"):
         if original.exists() and digest(original) != current:
-            raise SystemExit("Neue Original-DLL erkannt; vorhandene Sicherung wird nicht überschrieben.")
+            raise SystemExit("A new original DLL was detected. The existing backup will be preserved.")
         if not original.exists():
             shutil.copy2(target, original)
     state = {"fusion": str(fusion), "installed_sha256": expected,

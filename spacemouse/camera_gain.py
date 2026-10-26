@@ -26,16 +26,16 @@ def validate_settings(settings):
     for name in KEYS:
         value = settings[name]
         if type(value) is not int or not 1 <= value <= 100:
-            raise ValueError("Fusion-Kamerafaktoren müssen zwischen 1 und 100 liegen")
+            raise ValueError("Fusion camera factors must be between 1 and 100")
     scale = settings.get("runtime_scale", 1.0)
     if type(scale) not in (int, float) or not math.isfinite(scale) or not .04 <= scale <= 1:
-        raise ValueError("Ungültiger zusätzlicher Kamerafaktor")
+        raise ValueError("Invalid additional camera factor")
     return settings
 
 
 def percentage_settings(percent):
     if type(percent) is not int or not 1 <= percent <= 100:
-        raise ValueError("Kamerageschwindigkeit muss zwischen 1 und 100 Prozent liegen")
+        raise ValueError("Camera speed must be between 1 and 100 percent")
     native = math.ceil(percent / 25)
     return {**dict.fromkeys(KEYS, native), "runtime_scale": percent / (25 * native), "percent": percent}
 
@@ -51,12 +51,12 @@ def encode_type(data):
 def patch_options(data, gains):
     tree = ET.fromstring(data)
     if tree.tag != "OptionGroups":
-        raise ValueError("Unbekanntes Fusion-Einstellungsformat")
+        raise ValueError("Unknown Fusion settings format")
     encoding = encode_type(data)
     text = data.decode(encoding)
     matches = list(re.finditer(r"<UISpaceMouseOptionGroup\b[^>]*(?:/>|>.*?</UISpaceMouseOptionGroup>)", text, re.S))
     if len(matches) > 1:
-        raise ValueError("Mehrere SpaceMouse-Einstellungsgruppen gefunden")
+        raise ValueError("Multiple SpaceMouse settings groups found")
     if matches:
         match = matches[0]
         group = match.group()
@@ -67,11 +67,11 @@ def patch_options(data, gains):
     for name, key in KEYS.items():
         value = gains[name]
         if type(value) is not int or not 1 <= value <= 100:
-            raise ValueError("Fusion-Kamerafaktoren müssen zwischen 1 und 100 liegen")
+            raise ValueError("Fusion camera factors must be between 1 and 100")
         pattern = rf"<{key}\b[^>]*(?:/>|>.*?</{key}>)"
         nodes = list(re.finditer(pattern, group, re.S))
         if len(nodes) > 1:
-            raise ValueError("Doppelte Kameraeinstellung: " + key)
+            raise ValueError("Duplicate camera setting: " + key)
         if nodes:
             node = nodes[0].group()
             if re.search(r'\bValue="[^"]*"', node):
@@ -100,14 +100,14 @@ def legacy_options(data):
     ET.fromstring(data)
     groups = list(re.finditer(r'<CompatibilityGroup\b[^>]*(?:/>|>.*?</CompatibilityGroup>)', text, re.S))
     if len(groups) > 1:
-        raise ValueError("Mehrere Kompatibilitätsgruppen gefunden")
+        raise ValueError("Multiple compatibility groups found")
     group = groups[0].group() if groups else '<CompatibilityGroup SchemaVersion="2"></CompatibilityGroup>'
     if group.endswith('/>'):
         group = group[:-2] + '></CompatibilityGroup>'
     key = r'<spacemouseDriverOptionId\b[^>]*(?:/>|>.*?</spacemouseDriverOptionId>)'
     nodes = list(re.finditer(key, group, re.S))
     if len(nodes) > 1:
-        raise ValueError("Mehrere SpaceMouse-Treibereinstellungen gefunden")
+        raise ValueError("Multiple SpaceMouse driver settings found")
     if nodes:
         node = nodes[0].group()
         if re.search(r'\bValue="[^"]*"', node):
@@ -124,7 +124,7 @@ def legacy_options(data):
     result = text.encode(encoding)
     actual = ET.fromstring(result).find('CompatibilityGroup/spacemouseDriverOptionId')
     if actual is None or actual.attrib.get('Value') != '0':
-        raise ValueError("Legacy-Einstellung konnte nicht übernommen werden")
+        raise ValueError("Could not apply the Legacy driver setting")
     return result
 
 
@@ -150,7 +150,7 @@ def option_file():
         if len(fusion_users) == 1:
             return users / fusion_users.pop() / "AppData/Roaming/Autodesk/Neutron Platform/Options/NMachineSpecificOptions.xml"
     if len(candidates) != 1:
-        raise ValueError("Fusion-Einstellungsdatei nicht eindeutig gefunden")
+        raise ValueError("Could not identify a unique Fusion settings file")
     return candidates[0]
 
 
@@ -171,7 +171,7 @@ def main():
                  else {name: getattr(args, name) for name in KEYS})
         validate_settings(gains)
         atomic_write(pending, (json.dumps(gains, indent=2) + "\n").encode())
-        print("Kamerageschwindigkeit gespeichert; wirksam beim nächsten Fusion-Start.")
+        print("Camera speed saved. Applies when Fusion next starts.")
         return
     if args.show:
         print(pending.read_text() if pending.exists() else json.dumps({name: 4 for name in KEYS}))
@@ -183,7 +183,7 @@ def main():
     if not pending.exists():
         return
     if fusion_running():
-        print("Fusion läuft bereits; Kamerafaktoren bleiben für den nächsten Start vorgemerkt.")
+        print("Fusion is running. Camera speed will apply at the next start.")
         return
     gains = validate_settings(json.loads(pending.read_text()))
     path = option_file()
@@ -196,10 +196,10 @@ def main():
         if old is not None:
             shutil.copy2(path, backup / f"NMachineSpecificOptions-{time.time_ns()}.xml")
         if (path.read_bytes() if path.exists() else None) != old or fusion_running():
-            raise RuntimeError("Fusion oder seine Einstellungsdatei wurde zwischenzeitlich geändert")
+            raise RuntimeError("Fusion or its settings file changed during the operation")
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(path, new)
-    print("Fusion-Kamerafaktoren angewendet: " + json.dumps(gains))
+    print("Fusion camera factors applied: " + json.dumps(gains))
 
 
 if __name__ == "__main__":

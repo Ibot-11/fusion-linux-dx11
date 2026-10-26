@@ -85,21 +85,21 @@ class Decoder:
         """Decode one whole hidraw read; malformed reports never change state."""
         now = time.monotonic() if now is None else now
         if not report:
-            raise OSError('HID-Gerät getrennt')
+            raise OSError('HID device disconnected')
         report_id = report[0]
         if report_id == 1:
             if len(report) != MOTION.size:
-                raise ValueError('Unvollständiger HID-Achsenreport; erwartet werden 13 Bytes.')
+                raise ValueError('Incomplete HID motion report; expected 13 bytes.')
             values = list(MOTION.unpack(report)[1:])
             if any(not -350 <= value <= 350 for value in values):
-                raise ValueError('HID-Achsenreport außerhalb des geprüften Bereichs ±350.')
+                raise ValueError('HID motion report exceeds the supported ±350 range.')
             self.period_us = max(0, round((now-self.last_motion)*1000000)) if self.last_motion is not None else 0
             self.last_motion = now
             self.raw = values
             yield ('motion', transform(values, self.config), min(2147483647, self.period_us//1000))
         elif report_id == 3:
             if len(report) != 3 or report[1] & 0xfc or report[2]:
-                raise ValueError('Ungültiger HID-Tastenreport.')
+                raise ValueError('Invalid HID button report.')
             for index in range(2):
                 pressed = bool(report[1] & (1 << index))
                 if pressed != self.buttons[index]:
@@ -107,11 +107,11 @@ class Decoder:
                     yield ('button', index, pressed)
         elif report_id == 0x17:
             if len(report) != 3 or report[1] > 100 or report[2] & 0xfe:
-                raise ValueError('Ungültiger HID-Batteriereport.')
+                raise ValueError('Invalid HID battery report.')
             self.telemetry.update(battery_strength=report[1], vendor_27_bit=report[2] & 1)
         elif report_id == 0x1b:
             if len(report) != 2 or report[1] & 0xfe:
-                raise ValueError('Ungültiger HID-Statusreport.')
+                raise ValueError('Invalid HID status report.')
             # The descriptor declares a vendor bit, not its radio semantics.
             self.telemetry['vendor_28_bit'] = report[1] & 1
         else:

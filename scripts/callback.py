@@ -11,7 +11,7 @@ candidates = list(production.rglob('AdskIdentityManager.exe'))
 if not candidates:
     candidates = list((app/prefix_dir/'pfx/drive_c').rglob('AdskIdentityManager.exe'))
 if not candidates:
-    sys.exit('Autodesk Identity Manager fehlt.')
+    sys.exit('Autodesk Identity Manager is missing.')
 exe = max(candidates, key=lambda path: path.stat().st_mtime)
 with (app/'logs/callback.log').open('a') as log:
     sys.exit(subprocess.call([str(app/'run-proton.sh'), str(exe), sys.argv[1]], stdout=log, stderr=log))

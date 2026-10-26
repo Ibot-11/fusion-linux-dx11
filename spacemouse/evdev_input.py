@@ -21,10 +21,10 @@ DEFAULTS = {'deadzone': 0, 'enabled': [True] * 6, 'inverted': [False] * 6,
 def settings(path):
     value = json.loads(Path(path).read_text()) if Path(path).exists() else {}
     if not isinstance(value, dict) or set(value) - set(DEFAULTS):
-        raise ValueError('Ungültige Geräteeinstellungen.')
+        raise ValueError('Invalid device settings.')
     result = dict(DEFAULTS, **value)
     if type(result['deadzone']) is not int or not 0 <= result['deadzone'] <= 100:
-        raise ValueError('Deadzone muss zwischen 0 und 100 liegen.')
+        raise ValueError('Deadzone must be between 0 and 100.')
     for name in ('enabled', 'inverted'):
         if not isinstance(result[name], list) or len(result[name]) != 6 or any(type(x) is not bool for x in result[name]):
             raise ValueError('Sechs boolesche Achseneinstellungen erforderlich.')
@@ -119,7 +119,7 @@ class Decoder:
             elif kind == 0 and code == 0:
                 if self.dropped:
                     if self.recover is None:
-                        raise OSError('Input übergelaufen; Gerätezustand muss neu gelesen werden.')
+                        raise OSError('Input overflow; device state must be refreshed.')
                     self.raw, recovered_buttons = self.recover()
                     for index, pressed in enumerate(recovered_buttons):
                         if self.buttons[index] != pressed:
