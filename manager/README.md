@@ -1,121 +1,57 @@
-# Fusion Manager 1.2.0
+# Fusion Manager
 
-A native Linux application for Fusion, repository updates, Proton profiles and
-SpaceMouse settings. The interface is English, with a compact dark theme inspired
-by Fusion. Help buttons and expandable details keep explanations and diagnostics
-out of the main controls.
+Native Qt 6 application for installing and launching Fusion, selecting Wine prefixes and Proton runtimes, updating this integration and configuring SpaceMouse. The interface is available in English and German.
 
-Requires Qt 6 Widgets, a C++17 compiler, make/pkg-config and Python 3 (stdlib only).
-There is no web server, Electron runtime or permanent root service.
+## Start
 
-The Manager has its own icon for the application menu, window and sidebar.
-Its vector source is `desktop/fusion-manager.svg`; the matching PNG is embedded
-in the executable and installed separately from Fusion's icon.
-
-```sh
-make -C manager
+```bash
 ./manager/run.sh
-# Select a different installation:
+```
+
+After installation, use the **Fusion Manager** application-menu entry or run `fusion-manager`.
+
+Choose **English** or **Deutsch** in the sidebar. Confirm the restart to apply the language; the selection is saved per user. Without a saved selection, German is used for German system locales and English otherwise.
+
+## Pages
+
+- **Overview:** Fusion and integration versions, launch, repository status and updates.
+- **SpaceMouse:** device status, axes, button shortcuts and camera speed.
+- **Setup:** installation folder, source checkout, prefix, Proton and installation actions.
+- **Activity:** operation output and log-folder access.
+
+A different installation can be selected in **Setup → Change folders** or on the command line:
+
+```bash
 ./manager/run.sh --target /path/to/autodesk-fusion
 ```
 
-After installation, launch **Fusion Manager** from the application menu or run
-`fusion-manager`. The application manages four areas:
-
-- **Overview:** Fusion version, integration version, launch and repository updates.
-- **SpaceMouse:** axes, inversion, button bindings, camera speed and device status.
-- **Setup:** installation location, source checkout, prefix and Proton runtime.
-- **Activity:** operation output and access to log files.
-
 ## Installation and updates
 
-Choose an existing installation or an empty destination in Setup. A new
-installation uses Autodesk's official installer. Steam and a compatible Proton
-runtime must already be installed. Existing installations can be configured or
-updated without reinstalling Fusion.
+A new installation downloads Autodesk's official installer unless an existing installer executable is selected. **Adopt existing** configures an existing Fusion installation; **Apply checkout** deploys local changes without fetching Git updates.
 
-The source checkout can be cloned into an empty folder. Checking for updates
-performs an explicit Git fetch. Ahead/behind counts reflect the last fetch.
-Installing an update uses a fast-forward only; local edits and divergent history
-block it. The updater does not reset, stash or switch branches.
+**Check** explicitly fetches the configured remote. **Update** accepts only a fast-forward and refuses local changes or divergent history. The footer explains when no update was started or when the checkout is already current. The updater never resets, stashes or switches branches.
 
-Replaced runtime files are backed up under `backups/updates`. Documents and
-prefix, Proton, GPU, DXVK and SpaceMouse preferences are preserved. Autodesk
-Fusion itself continues to use its own updater. Applying the current checkout
-installs the local integration without fetching Git updates.
+Replaced runtime files are backed up under `backups/updates`. Prefixes, documents and Proton, GPU, DXVK and SpaceMouse preferences are preserved. Fusion itself continues to use Autodesk's updater.
 
-An active Fusion session blocks installation, integration updates, SDK changes
-and profile changes. Device settings can be saved during a session. Camera speed
-updates a supported running Fusion session and is also saved for future starts.
-If live control is unavailable, the saved speed applies at the next start. No Fusion process is terminated by the
-manager. Only one manager operation per user runs at a time, and closing the
-window cannot interrupt an active install or update.
+Close Fusion before installation, integration updates, SDK changes or runtime changes. Camera speed can be applied while Fusion is running; if live control is unavailable, it takes effect at the next launch. Only one Manager operation runs at a time, and the window cannot be closed during an active operation.
 
-## Device access and precision
+## SpaceMouse access and shortcuts
 
-The supported Universal Receiver (`256f:c652`, verified 448-byte HID descriptor)
-uses direct HID reports. Native signed counts reach the Wine SDK unchanged;
-camera speed is applied after integer input. The default deadzone is zero.
-Reports are forwarded individually without synthetic repeats. A 250 ms motion
-watchdog sends a neutral state and releases buttons if motion reports stop;
-battery and vendor-status packets do not extend that deadline.
+If direct HID access is missing, choose **Set up device access** and approve the Polkit prompt. The argumentless helper installs an identity-restricted `uaccess` rule for the reviewed Universal Receiver. Reconnect the receiver afterwards. Cancelling leaves permissions unchanged; no root daemon is installed.
 
-If HID access is missing, **Set up access** requests administrator approval
-through Polkit. A fixed, argumentless helper creates only
-`/etc/udev/rules.d/70-fusion-spacemouse.rules` for that receiver and reloads udev
-rules. Reconnect the receiver afterward. Access belongs to the active local
-desktop session; no world-writable device permissions or root daemon are used.
-Cancelling approval leaves permissions unchanged.
+Use **Record shortcut…** to assign a key or combination to either SpaceMouse button. **Type shortcut** accepts text such as `Ctrl+Shift+S` when the desktop reserves a combination. Keyboard actions apply only while Fusion has focus and are released on focus loss or disconnect.
 
-The explicitly identified evdev fallback is limited: a steady deflection stops
-after 250 ms without an ABS change. Set up direct HID access for held movement.
-Unsupported devices are not treated as a verified motion interface.
+See [SpaceMouse compatibility, protocols and diagnostics](../spacemouse/README.md) for supported hardware and limitations.
 
-## Button assignments
+## Logs and diagnostics
 
-Choose **Record shortcut…** under Left or Right, press the desired key or
-combination, then release it. Choose **Use shortcut** and **Save input**.
-Single keys, F1–F24, navigation keys, number-pad keys and Ctrl/Shift/Alt/Super/AltGr
-combinations are supported. Modifiers can also be assigned as held buttons.
-**Type shortcut** accepts a shortcut such as `Ctrl+Shift+S` when the desktop
-reserves it and prevents recording. Assignments contain one chord, not macros.
+The selected installation contains `logs/manager-launch.log` and the other runtime logs. **Activity → Open log folder** opens this location. Version information comes from the selected Fusion executable and `repo-state.json`; repository information comes from Git.
 
-Keyboard actions apply while Fusion has focus. Shared modifiers remain held
-until both assigned buttons release them. Focus loss, disconnect and shutdown
-release held keys. Printable characters follow Fusion's Windows keyboard layout;
-characters unavailable in that layout are rejected. Existing button assignments
-survive updates; their current keys appear without action presets.
+## Build and verification
 
-## Camera speed
+Requirements: Python 3, a C++17 compiler, Make, pkg-config, Qt 6 Widgets development tools and Vulkan headers.
 
-Set **Camera speed** and choose **Apply**. **Live · 20 %**, for example, confirms
-the speed reported by the active Fusion session. The saved value is also used at
-future starts. One speed setting covers both uses.
-
-Live control uses the existing floating-point camera normalizer, with the full
-routine signature checked for Fusion 2705.1.30. It preserves integer input
-counts and accounts for the native gains fixed at session startup. The Manager
-accepts confirmation only from the selected installation and launch session.
-An unavailable, old or unsupported bridge shows **Saved for next launch** or
-**Next launch · live unavailable**; the tooltip explains why. A running session's
-XML preferences remain unchanged. Unknown Fusion builds retain the portable
-native speed steps described in the SpaceMouse documentation.
-
-## Status and diagnostics
-
-Fusion's version comes from the selected executable's `fusion_version.txt` or
-validated `version.json`. Integration version and revision come from
-`repo-state.json`; missing metadata remains unknown. Repository information comes
-from Git, and device status comes from sysfs, access checks and the local bridge.
-
-Live axes use the bridge's status file at 100 ms intervals. Installation, Git and
-Proton status refresh every five seconds. Network access occurs on explicit
-actions. Launch output is recorded in `logs/manager-launch.log`. Camera settings
-below 25% retain the existing signature check for supported Fusion builds.
-
-## Verification
-
-```sh
+```bash
 make -C layer
 make -C manager
 make -C manager check
@@ -123,17 +59,9 @@ bash spacemouse/build.sh
 python3 -m unittest discover -s tests -v
 python3 -m unittest discover -s spacemouse/tests -p 'test_*.py' -v
 QT_QPA_PLATFORM=offscreen ./manager/run.sh --smoke-test --target /tmp/fusion-empty
-QT_QPA_PLATFORM=offscreen ./manager/run.sh --screenshot /tmp/fusion-manager.png
+QT_QPA_PLATFORM=offscreen ./manager/run.sh --lang de --smoke-test --target /tmp/fusion-empty
 ```
 
-`--app-dir` aliases `--target`. Use `--page overview|spacemouse|setup|log` and
-`--size 1100x850` for reproducible screenshots. Screenshot and smoke modes only
-read status: they do not launch Fusion, change permissions or switch services.
-Tests use temporary installations, local Git repositories and synthetic input
-on private test ports; privileged actions are mocked.
+`--page overview|spacemouse|setup|log` selects the initial page. `--screenshot /path/to/manager.png` and `--size 1100x850` support reproducible captures. Screenshot and smoke modes only read status and do not launch Fusion, change permissions or switch services.
 
-The manager and direct Linux input layer are original implementations under
-GPL-3.0-or-later. The reviewed Wine SDK bridge keeps its GPL license; MinHook
-retains its own license. Qt is dynamically linked. See
-[SpaceMouse documentation](../spacemouse/README.md) and
-[bridge license](../spacemouse/bridge/COPYING).
+The Manager and direct Linux input layer are GPL-3.0-or-later. Qt is dynamically linked. Third-party license notices are included under `spacemouse/`.

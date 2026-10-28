@@ -7,7 +7,7 @@ root = d.screen().root
 
 root.change_attributes(event_mask=X.SubstructureNotifyMask)
 
-print("[Fusion180] Event-driven watcher started")
+print("[Fusion Linux] Event-driven watcher started")
 
 
 def is_problematic(win):
@@ -50,7 +50,7 @@ def is_problematic(win):
 
             coverage = popup_area / parent_area
 
-            print(f"[Fusion180][debug] win={win.id:#x} "
+            print(f"[Fusion Linux][debug] win={win.id:#x} "
                   f"popup={popup_geom.width}x{popup_geom.height} "
                   f"parent={parent_geom.width}x{parent_geom.height} "
                   f"coverage={coverage:.2f}")
@@ -58,7 +58,7 @@ def is_problematic(win):
             if coverage < 0.8:
                 return False
         except Exception as e:
-            print(f"[Fusion180][debug] geometry check failed for {win.id:#x}: {e}")
+            print(f"[Fusion Linux][debug] geometry check failed for {win.id:#x}: {e}")
             return False
 
         if attrs.map_state != X.IsViewable:
@@ -75,6 +75,6 @@ while True:
     if ev.type == X.MapNotify:
         win = ev.window
         if is_problematic(win):
-            print(f"[Fusion180] Problematic dialog detected (event-driven): {win.id:#x}")
+            print(f"[Fusion Linux] Problematic dialog detected (event-driven): {win.id:#x}")
             win.unmap()
             d.sync()

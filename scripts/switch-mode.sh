@@ -2,36 +2,7 @@
 set -euo pipefail
 
 APP_DIR="${FUSION_APP_DIR:-$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")}"
-
-STEAM_SEARCH_DIRS=(
-  "$HOME/.local/share/Steam"
-  "$HOME/.steam/root"
-  "$HOME/.steam/steam"
-  "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam"
-)
-
-STEAM_DIR=""
-for d in "${STEAM_SEARCH_DIRS[@]}"; do
-  if [[ -d "$d" ]]; then
-    STEAM_DIR="$d"
-    break
-  fi
-done
-
-stop_prefix_wineserver() {
-  local prefix="$1"
-  local proton_ver="$2"
-  local proton_dir=""
-  if [[ -n "$STEAM_DIR" && -d "$STEAM_DIR/compatibilitytools.d/$proton_ver" ]]; then
-    proton_dir="$STEAM_DIR/compatibilitytools.d/$proton_ver"
-  elif [[ -n "$STEAM_DIR" && -d "$STEAM_DIR/steamapps/common/$proton_ver" ]]; then
-    proton_dir="$STEAM_DIR/steamapps/common/$proton_ver"
-  fi
-  if [[ -n "$proton_dir" && -x "$proton_dir/files/bin/wineserver" && -d "$APP_DIR/$prefix/pfx" ]]; then
-    WINEPREFIX="$APP_DIR/$prefix/pfx" "$proton_dir/files/bin/wineserver" -k 2>/dev/null || true
-    WINEPREFIX="$APP_DIR/$prefix/pfx" "$proton_dir/files/bin/wineserver" -w 2>/dev/null || true
-  fi
-}
+PROTON_HELPER="$APP_DIR/proton.py"
 
 case "${1:-status}" in
   exp-dx11|experimental|dx11)
@@ -39,10 +10,13 @@ case "${1:-status}" in
       echo "Close Autodesk Fusion before switching profiles." >&2
       exit 1
     fi
-    stop_prefix_wineserver "compatdata" "GE-Proton11-7-x86_64"
-    stop_prefix_wineserver "compatdata-exp-dx11" "Proton - Experimental"
+    if ! proton_dir="$(python3 "$PROTON_HELPER" find 'Proton - Experimental')"; then
+      echo "Error: Proton Experimental is not installed in Steam or a Steam library." >&2
+      exit 1
+    fi
     printf 'compatdata-exp-dx11\n' > "$APP_DIR/prefix-dir"
     printf 'Proton - Experimental\n' > "$APP_DIR/proton-version"
+    rm -f -- "$APP_DIR/proton-path"
     chmod 600 "$APP_DIR/prefix-dir" "$APP_DIR/proton-version"
     echo "Enabled: Proton - Experimental + DirectX 11 (Prefix: compatdata-exp-dx11)"
     ;;
@@ -51,12 +25,16 @@ case "${1:-status}" in
       echo "Close Autodesk Fusion before switching profiles." >&2
       exit 1
     fi
-    stop_prefix_wineserver "compatdata-exp-dx11" "Proton - Experimental"
-    stop_prefix_wineserver "compatdata" "GE-Proton11-7-x86_64"
+    if ! proton_dir="$(python3 "$PROTON_HELPER" find-ge)"; then
+      echo "Error: No installed GE-Proton was found in Steam or a Steam library." >&2
+      exit 1
+    fi
+    proton_version="$(basename -- "$proton_dir")"
     printf 'compatdata\n' > "$APP_DIR/prefix-dir"
-    printf 'GE-Proton11-7-x86_64\n' > "$APP_DIR/proton-version"
+    printf '%s\n' "$proton_version" > "$APP_DIR/proton-version"
+    rm -f -- "$APP_DIR/proton-path"
     chmod 600 "$APP_DIR/prefix-dir" "$APP_DIR/proton-version"
-    echo "Enabled: GE-Proton11-7-x86_64 + OpenGL Core Profile (Prefix: compatdata)"
+    echo "Enabled: $proton_version + OpenGL Core Profile (Prefix: compatdata)"
     ;;
   status)
     echo "Current prefix : $(cat "$APP_DIR/prefix-dir" 2>/dev/null || echo compatdata-exp-dx11)"

@@ -5,7 +5,8 @@ if len(sys.argv) < 2:
 url = sys.argv[1]
 if urllib.parse.urlsplit(url).scheme not in ('https', 'http'):
     sys.exit(1)
-queue = pathlib.Path('/run/user') / str(os.getuid()) / 'autodesk-fusion-browser'
+runtime = pathlib.Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'))
+queue = runtime / 'autodesk-fusion-browser'
 queue.mkdir(mode=0o700, exist_ok=True)
 fd, name = tempfile.mkstemp(dir=queue, suffix='.partial')
 with os.fdopen(fd, 'w') as stream:

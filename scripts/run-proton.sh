@@ -9,29 +9,21 @@ PROTON_VERSION="${FUSION_PROTON_VERSION:-Proton - Experimental}"
 if [[ -f "$APP_DIR/prefix-dir" ]]; then PREFIX_DIR="$(cat "$APP_DIR/prefix-dir")"; fi
 if [[ -f "$APP_DIR/proton-version" ]]; then PROTON_VERSION="$(cat "$APP_DIR/proton-version")"; fi
 
-# Steam search paths
-STEAM_SEARCH_DIRS=(
-  "$HOME/.local/share/Steam"
-  "$HOME/.steam/root"
-  "$HOME/.steam/steam"
-  "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam"
-)
+CUSTOM_PROTON="${FUSION_PROTON_PATH:-}"
+if [[ -f "$APP_DIR/proton-path" ]]; then CUSTOM_PROTON="$(cat "$APP_DIR/proton-path")"; fi
+STEAM_DIR="$(python3 "$APP_DIR/proton.py" steam || true)"
+PROTON_DIR="$(python3 "$APP_DIR/proton.py" find "$PROTON_VERSION" "$CUSTOM_PROTON" || true)"
 
-STEAM_DIR=""
-for d in "${STEAM_SEARCH_DIRS[@]}"; do
-  if [[ -d "$d" ]]; then
-    STEAM_DIR="$d"
-    break
-  fi
-done
-
-if [[ -z "$STEAM_DIR" ]]; then
-  echo "Error: Steam folder not found." >&2
+if [[ -z "$PROTON_DIR" ]]; then
+  echo "Error: Proton version '$PROTON_VERSION' not found." >&2
+  echo "Make sure '$PROTON_VERSION' is installed or select a valid custom Proton path." >&2
   exit 1
 fi
 
 export STEAM_COMPAT_DATA_PATH="$APP_DIR/$PREFIX_DIR"
-export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_DIR"
+if [[ -n "$STEAM_DIR" ]]; then
+  export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_DIR"
+fi
 export PROTON_USE_WINED3D=0
 export PROTON_USE_XALIA=0
 export NO_AT_BRIDGE=1
@@ -62,24 +54,6 @@ export BROWSER="$APP_DIR/browser-request.py"
 export WINEDEBUG=-all
 
 mkdir -p "$STEAM_COMPAT_DATA_PATH" "$DXVK_LOG_PATH"
-
-# Locate Proton installation
-PROTON_DIR=""
-if [[ -f "$APP_DIR/proton-path" && -f "$(cat "$APP_DIR/proton-path")/proton" ]]; then
-  PROTON_DIR="$(cat "$APP_DIR/proton-path")"
-elif [[ -d "$STEAM_DIR/compatibilitytools.d/$PROTON_VERSION" ]]; then
-  PROTON_DIR="$STEAM_DIR/compatibilitytools.d/$PROTON_VERSION"
-elif [[ -d "$STEAM_DIR/steamapps/common/$PROTON_VERSION" ]]; then
-  PROTON_DIR="$STEAM_DIR/steamapps/common/$PROTON_VERSION"
-elif [[ -d "/usr/share/steam/compatibilitytools.d/$PROTON_VERSION" ]]; then
-  PROTON_DIR="/usr/share/steam/compatibilitytools.d/$PROTON_VERSION"
-fi
-
-if [[ -z "$PROTON_DIR" ]]; then
-  echo "Error: Proton version '$PROTON_VERSION' not found." >&2
-  echo "Make sure Steam and '$PROTON_VERSION' are installed." >&2
-  exit 1
-fi
 
 if [[ "${1:-}" == --panel-fix ]]; then
   shift

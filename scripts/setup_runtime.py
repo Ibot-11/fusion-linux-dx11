@@ -16,7 +16,7 @@ sys.path.insert(0, str(REPO / "spacemouse"))
 from processes import fusion_running
 
 RUNTIME_FILES = ("launch.sh", "run-proton.sh", "switch-mode.sh", "browser-listener.py",
-                 "browser-request.py", "callback.py", "window-fix.py", "update.py", "manager_backend.py", "manager.sh")
+                 "browser-request.py", "callback.py", "window-fix.py", "update.py", "proton.py", "manager_backend.py", "manager.sh")
 SPACE_HELPERS = ("start.py", "evdev_input.py", "keybindings.py", "camera_control.py", "hidraw_input.py", "processes.py", "control.py", "install-sdk.py",
                  "camera_gain.py", "camera-settings.sh", "settings.sh")
 MANAGED = (*RUNTIME_FILES, "processes.py", "panel-fix.exe", "panel-fix.c",
@@ -117,6 +117,11 @@ def migrate_gpu_preferences(app):
         atomic_write(target, data.encode(), 0o600)
 
 
+def systemd_escape(value):
+    """Escape a value inside a quoted systemd command-line argument."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
+
+
 def desktop_entry(app, executable, name, comment, terminal=False, icon="autodesk-fusion"):
     # Desktop Exec quoting differs from shell quoting. Escape all reserved chars,
     # including literal percent signs, without invoking a shell.
@@ -139,6 +144,7 @@ def deploy_desktop(app):
     atomic_write(apps / "autodesk-fusion-update.desktop", desktop_entry(app, "update.py", "Update Fusion", "Update the Linux integration from its Git repository", True), 0o755)
     copy_file(REPO / "desktop/autodesk-fusion.png", data / "icons/hicolor/256x256/apps/autodesk-fusion.png")
     copy_file(REPO / "desktop/fusion-manager.png", data / "icons/hicolor/256x256/apps/fusion-manager.png")
+    copy_file(REPO / "desktop/fusion-manager.svg", data / "icons/hicolor/scalable/apps/fusion-manager.svg")
     local_bin = Path.home() / ".local/bin"
     local_bin.mkdir(parents=True, exist_ok=True)
     atomic_write(apps / "fusion-manager.desktop", desktop_entry(app, "manager.sh", "Fusion Manager", "Manage Fusion, updates and SpaceMouse", icon="fusion-manager"), 0o755)
@@ -212,9 +218,10 @@ def deploy_spacemouse(repo, app, prefix, service=True, desktop=True, enable=True
         subprocess.run(["systemctl", "--user", "stop", "fusion-spacemouse.service"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         config = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
         # systemd's quoted ExecStart also expands percent specifiers.
-        path = str(dest / "start.py").replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
+        path = systemd_escape(str(dest / "start.py"))
+        executable = systemd_escape(str(Path(sys.executable).resolve()))
         unit = ('[Unit]\nDescription=Fusion SpaceMouse direct HID bridge (evdev fallback)\nStartLimitIntervalSec=30\nStartLimitBurst=3\n\n'
-                '[Service]\nType=notify\nNotifyAccess=main\nExecStart=/usr/bin/python3 "' + path + '"\n'
+                '[Service]\nType=notify\nNotifyAccess=main\nExecStart="' + executable + '" "' + path + '"\n'
                 'KillMode=control-group\nRestart=on-failure\nRestartSec=2\nTimeoutStartSec=12\nTimeoutStopSec=5\n')
         atomic_write(config / "systemd/user/fusion-spacemouse.service", unit.encode())
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)

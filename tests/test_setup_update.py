@@ -4,9 +4,11 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -144,6 +146,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertEqual((self.app / 'proton-version').read_text(), 'Proton - Experimental\n')
         self.assertEqual(json.loads((self.app / 'repo-state.json').read_text())['version'], 'test-version')
         self.assertTrue(os.access(self.app / 'update.py', os.X_OK))
+        self.assertTrue((self.app / 'proton.py').is_file())
 
     def test_static_gpu_preferences_migrate_without_evaluating_shell(self):
         marker = self.app / 'must-not-exist'
@@ -201,6 +204,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
             setup_runtime.deploy_spacemouse(REPO, self.app, 'custom-prefix')
         unit = self.root / 'config/systemd/user/fusion-spacemouse.service'
         self.assertIn('Type=notify', unit.read_text())
+        self.assertIn('ExecStart="' + setup_runtime.systemd_escape(str(Path(sys.executable).resolve())) + '"', unit.read_text())
         self.assertIn('$$', unit.read_text())
         self.assertIn('%%', unit.read_text())
         self.assertTrue((self.app / 'spacemouse-enabled').exists())
@@ -241,6 +245,17 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertIn('%%', data)
         self.assertIn('" --interactive\n', data)
 
+    def test_desktop_installs_scalable_manager_icon(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            setup_runtime.deploy_desktop(self.app)
+        icons = self.root / 'data/icons/hicolor'
+        self.assertTrue((icons / '256x256/apps/fusion-manager.png').is_file())
+        self.assertTrue((icons / 'scalable/apps/fusion-manager.svg').is_file())
+
+    def test_systemd_escaping_covers_executable_and_path_characters(self):
+        escaped = setup_runtime.systemd_escape('/opt/python % $/a\\b"c')
+        self.assertEqual(escaped, '/opt/python %% $$/a\\\\b\\"c')
+
     def test_symlink_launcher_uses_its_actual_installation(self):
         self.deploy()
         commands = self.root / 'commands'
@@ -257,6 +272,125 @@ class RuntimeDeploymentTests(unittest.TestCase):
         result = subprocess.run([str(link)], env=env, capture_output=True)
         self.assertEqual(result.returncode, 1)  # Expected: no Fusion EXE in test prefix.
         self.assertEqual(capture.read_text(), str(self.app / 'custom-prefix/pfx/drive_c'))
+
+
+class PortabilityTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.app = self.root / 'Fusion app'
+        self.app.mkdir()
+        shutil.copy2(REPO / 'scripts/proton.py', self.app / 'proton.py')
+        self.env = dict(os.environ, HOME=str(self.root / 'home'), FUSION_APP_DIR=str(self.app))
+        Path(self.env['HOME']).mkdir()
+
+    def executable(self, path, text):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        path.chmod(0o755)
+
+    def test_run_proton_uses_custom_path_without_steam(self):
+        custom = self.root / 'Custom Proton'
+        self.executable(custom / 'proton', '#!/bin/sh\nprintf "%s\\n" "$@"\n')
+        (self.app / 'proton-path').write_text(str(custom) + '\n')
+        result = subprocess.run(['bash', str(REPO / 'scripts/run-proton.sh'), 'Fusion 360.exe'],
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ['run', 'Fusion 360.exe'])
+
+    def test_switch_mode_resolves_profiles_and_removes_stale_custom_path(self):
+        commands = self.root / 'commands'
+        self.executable(commands / 'pgrep', '#!/bin/sh\nexit 1\n')
+        self.env['PATH'] = str(commands) + ':' + self.env['PATH']
+        common = self.root / 'home/.local/share/Steam/steamapps/common'
+        for name in ('Proton - Experimental', 'GE-Proton12-1'):
+            (common / name).mkdir(parents=True)
+            (common / name / 'proton').touch()
+        (self.app / 'proton-path').write_text(str(self.root / 'stale custom Proton') + '\n')
+        for mode, name in (('exp-dx11', 'Proton - Experimental'), ('ge-opengl', 'GE-Proton12-1')):
+            with self.subTest(mode=mode):
+                result = subprocess.run(['bash', str(REPO / 'scripts/switch-mode.sh'), mode],
+                                        env=self.env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((self.app / 'proton-version').read_text(), name + '\n')
+                self.assertFalse((self.app / 'proton-path').exists())
+
+    def test_camera_preparation_failure_warns_and_still_launches(self):
+        fusion = self.app / 'compatdata-exp-dx11/pfx/drive_c/Fusion360.exe'
+        fusion.parent.mkdir(parents=True)
+        fusion.touch()
+        (self.app / 'spacemouse').mkdir()
+        (self.app / 'spacemouse-enabled').touch()
+        self.executable(self.app / 'spacemouse/camera_gain.py', '#!/bin/sh\nexit 1\n')
+        self.executable(self.app / 'spacemouse/install-sdk.py', '#!/bin/sh\nexit 0\n')
+        launched = self.root / 'launched'
+        self.executable(self.app / 'run-proton.sh', '#!/bin/sh\ntouch "$LAUNCHED"\n')
+        commands = self.root / 'commands'
+        for name in ('kdialog', 'zenity', 'powerprofilesctl'):
+            self.executable(commands / name, '#!/bin/sh\nexit 1\n')
+        self.executable(commands / 'systemctl', '#!/bin/sh\nexit 0\n')
+        env = dict(self.env, PATH=str(commands) + ':' + self.env['PATH'], LAUNCHED=str(launched))
+        result = subprocess.run(['bash', str(REPO / 'scripts/launch.sh')], env=env,
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(launched.exists())
+        self.assertIn('Warning: Could not apply SpaceMouse camera speed.', result.stderr)
+        self.assertNotIn('wineserver', (REPO / 'scripts/launch.sh').read_text())
+
+
+class BrowserHandoffTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.runtime = self.root / 'runtime'
+        self.queue = self.runtime / 'autodesk-fusion-browser'
+        self.queue.mkdir(parents=True)
+        self.app = self.root / 'app'
+        (self.app / 'logs').mkdir(parents=True)
+        self.request = self.queue / 'test.request'
+        self.request.write_text('https://example.invalid/path')
+        self.env = dict(os.environ, XDG_RUNTIME_DIR=str(self.runtime), FUSION_APP_DIR=str(self.app))
+
+    def wait_for_request_removal(self):
+        deadline = time.monotonic() + 3
+        while self.request.exists() and time.monotonic() < deadline:
+            time.sleep(.05)
+        self.assertFalse(self.request.exists(), 'Browser request was not consumed')
+
+    def test_listener_uses_xdg_open_from_path(self):
+        commands = self.root / 'commands'
+        commands.mkdir()
+        capture = self.root / 'url'
+        opener = commands / 'xdg-open'
+        opener.write_text('#!/bin/sh\nprintf "%s" "$1" > "$CAPTURE"\n')
+        opener.chmod(0o755)
+        env = dict(self.env, PATH=str(commands) + ':' + self.env['PATH'], CAPTURE=str(capture))
+        process = subprocess.Popen([sys.executable, str(REPO / 'scripts/browser-listener.py')], env=env)
+        try:
+            self.wait_for_request_removal()
+            deadline = time.monotonic() + 2
+            while not capture.exists() and time.monotonic() < deadline:
+                time.sleep(.05)
+            self.assertEqual(capture.read_text(), 'https://example.invalid/path')
+        finally:
+            process.terminate()
+            process.wait(timeout=3)
+
+    def test_listener_does_not_retry_after_launch_failure(self):
+        empty_path = self.root / 'empty'
+        empty_path.mkdir()
+        env = dict(self.env, PATH=str(empty_path))
+        process = subprocess.Popen([sys.executable, str(REPO / 'scripts/browser-listener.py')], env=env)
+        try:
+            self.wait_for_request_removal()
+            time.sleep(.4)
+            log = (self.app / 'logs/browser.log').read_text()
+            self.assertEqual(log.count('Browser handoff failed:'), 1)
+        finally:
+            process.terminate()
+            process.wait(timeout=3)
 
 
 if __name__ == '__main__':

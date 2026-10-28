@@ -53,7 +53,7 @@ must not be described as full original behavior.
 ### One-time access setup
 
 Nothing is elevated during status, installation or startup. If existing session
-ACLs do not grant raw-device read access, explicitly click **Set up access**
+ACLs do not grant raw-device read access, explicitly click **Set up device access**
 in the Manager. `pkexec` asks for administrator authorization and
 runs the fixed compiled `fusion-spacemouse-access` helper. It accepts no command
 arguments, environment-selected target paths, shell text or commands. It can

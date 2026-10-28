@@ -15,6 +15,7 @@ static void ready(Shortcuts::Recorder &dialog) {
 }
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
+    I18n::setLanguage("en");
     {
         Shortcuts::Recorder dialog("Left button"); ready(dialog);
         QTest::keyClick(&dialog, Qt::Key_G);
@@ -92,6 +93,26 @@ int main(int argc, char **argv) {
         QTest::keyClick(&dialog, Qt::Key_1, Qt::KeypadModifier);
         check(dialog.binding()["key"] == "NUM1", "Keypad digits must retain their distinct identity");
     }
+    {
+        I18n::setLanguage("de");
+        Shortcuts::Recorder dialog("Rechte Taste"); ready(dialog);
+        check(dialog.findChild<QLabel *>("shortcut-preview")->text() == "Taste oder Tastenkürzel drücken",
+              "Recorder instructions must follow the selected language");
+        check(useButton(dialog)->text() == "Tastenkürzel übernehmen",
+              "Recorder actions must follow the selected language");
+        check(dialog.findChild<QPushButton *>("cancel-recording")->text() == "Abbrechen",
+              "Recorder cancellation must follow the selected language");
+        check(Shortcuts::display(QJsonValue("off")) == "Keine Aktion",
+              "Binding labels must follow the selected language");
+        QTest::keyClick(&dialog, Qt::Key_Home);
+        check(dialog.findChild<QLabel *>("shortcut-preview")->text() == "Pos1",
+              "German key labels must not change the recorded key identity");
+        check(dialog.binding()["key"] == "HOME", "German recording must retain stable backend keys");
+        check(Shortcuts::display(Shortcuts::parse("Ctrl+Shift+S")) == "Strg + Umschalt + S",
+              "German modifier labels must be localized without changing portable input");
+        I18n::setLanguage("en");
+    }
     std::cout << "PASS shortcut capture: arbitrary keys, chords, modifiers, reserved dialog keys, retry and cancel\n";
+    std::cout << "PASS shortcut i18n: localized controls, key labels and stable backend identities\n";
     return 0;
 }

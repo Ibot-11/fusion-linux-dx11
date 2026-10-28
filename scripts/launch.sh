@@ -21,6 +21,17 @@ fi
 
 mkdir -p "$APP_DIR/logs"
 
+spacemouse_warning() {
+  local message="$1"
+  if command -v kdialog >/dev/null 2>&1 && kdialog --passivepopup "$message" 10; then
+    return
+  fi
+  if command -v zenity >/dev/null 2>&1 && zenity --warning --text="$message"; then
+    return
+  fi
+  printf 'Warning: %s\n' "$message" >&2
+}
+
 # Rotate fusion.log if it exceeds 20MB
 if [[ -f "$APP_DIR/logs/fusion.log" && $(stat -c%s "$APP_DIR/logs/fusion.log" 2>/dev/null || echo 0) -gt 20971520 ]]; then
   mv "$APP_DIR/logs/fusion.log" "$APP_DIR/logs/fusion.log.old"
@@ -35,28 +46,13 @@ if [[ -f "$APP_DIR/spacemouse-enabled" ]]; then
       export FUSION_SPACEMOUSE_CAMERA_BASE="$fusion_camera_base"
       export FUSION_SPACEMOUSE_CAMERA_SESSION="$fusion_camera_token"
     else
-      kdialog --passivepopup 'Could not apply SpaceMouse camera speed. See the Fusion log.' 10 || true
-      exit 1
+      spacemouse_warning 'Could not apply SpaceMouse camera speed. See the Fusion log.'
     fi
   fi
   if ! python3 "$APP_DIR/spacemouse/install-sdk.py" "$FUSION" >> "$APP_DIR/logs/spacemouse-start.log" 2>&1 ||
      ! systemctl --user start fusion-spacemouse.service >> "$APP_DIR/logs/spacemouse-start.log" 2>&1; then
-    if command -v kdialog >/dev/null 2>&1; then
-      kdialog --passivepopup 'SpaceMouse could not start. See the Fusion SpaceMouse journal.' 10 || true
-    fi
+    spacemouse_warning 'SpaceMouse could not start. See the Fusion SpaceMouse journal.'
   fi
-fi
-
-# Ensure no orphaned wineserver from a previous session remains
-if ! pgrep -fi "Fusion360\.exe" >/dev/null 2>&1; then
-  PV="${FUSION_PROTON_VERSION:-GE-Proton11-7-x86_64}"
-  if [[ -f "$APP_DIR/proton-version" ]]; then PV="$(cat "$APP_DIR/proton-version")"; fi
-  for pdir in "$HOME/.local/share/Steam/compatibilitytools.d/$PV" "$HOME/.local/share/Steam/steamapps/common/$PV"; do
-    if [[ -x "$pdir/files/bin/wineserver" ]]; then
-      WINEPREFIX="$APP_DIR/$PREFIX_DIR/pfx" "$pdir/files/bin/wineserver" -k 2>/dev/null || true
-      break
-    fi
-  done
 fi
 
 python3 "$APP_DIR/browser-listener.py" &

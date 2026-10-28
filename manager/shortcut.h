@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
+#include "i18n.h"
 
 namespace Shortcuts {
 inline QString modifierName(int key) {
@@ -91,12 +92,12 @@ inline QString displayKey(const QString &key) {
         {"NUMLOCK", "Num Lock"}, {"SCROLLLOCK", "Scroll Lock"}, {"MENU", "Menu"},
         {"NUMENTER", "Num Enter"}, {"NUMADD", "Num +"}, {"NUMSUBTRACT", "Num −"},
         {"NUMMULTIPLY", "Num ×"}, {"NUMDIVIDE", "Num ÷"}, {"NUMDECIMAL", "Num Decimal"}};
-    return names.value(key, key);
+    return I18n::tr(names.value(key, key));
 }
 inline QString display(const QJsonValue &binding) {
     if (binding.isString()) {
-        if (binding.toString() == "off") return "No action";
-        if (binding.toString() == "sdk") return "Native SDK button";
+        if (binding.toString() == "off") return I18n::tr("No action");
+        if (binding.toString() == "sdk") return I18n::tr("Native SDK button");
         return displayKey(binding.toString());
     }
     const auto object = binding.toObject();
@@ -152,10 +153,10 @@ inline QString portable(const QJsonObject &binding) {
 }
 
 class Recorder : public QDialog {
-    QLabel *preview = new QLabel("Press a key or shortcut");
+    QLabel *preview = new QLabel(I18n::tr("Press a key or shortcut"));
     QLabel *hint = new QLabel;
-    QPushButton *use = new QPushButton("Use shortcut");
-    QPushButton *manualMode = new QPushButton("Type shortcut");
+    QPushButton *use = new QPushButton(I18n::tr("Use shortcut"));
+    QPushButton *manualMode = new QPushButton(I18n::tr("Type shortcut"));
     QLineEdit *manual = new QLineEdit;
     QSet<quint64> held;
     QJsonObject candidate;
@@ -171,10 +172,10 @@ class Recorder : public QDialog {
         mainKey = false;
         invalid = false;
         listening = true;
-        preview->setText("Press a key or shortcut");
+        preview->setText(I18n::tr("Press a key or shortcut"));
         preview->show();
         manual->hide();
-        manualMode->setText("Type shortcut");
+        manualMode->setText(I18n::tr("Type shortcut"));
         hint->clear();
         use->setEnabled(false);
         preview->setFocus();
@@ -203,12 +204,12 @@ class Recorder : public QDialog {
                 if (value.isEmpty()) {
                     invalid = true;
                     candidate = {};
-                    hint->setText("This key is not supported. Try another key.");
+                    hint->setText(I18n::tr("This key is not supported. Try another key."));
                 } else {
                     candidate = value;
                     mainKey = modifierName(key->key()).isEmpty();
                     preview->setText(display(candidate));
-                    hint->setText("Release the keys");
+                    hint->setText(I18n::tr("Release the keys"));
                 }
             }
         } else {
@@ -216,7 +217,7 @@ class Recorder : public QDialog {
             if (held.isEmpty() && invalid) {
                 invalid = false;
                 mainKey = false;
-                preview->setText("Press a key or shortcut");
+                preview->setText(I18n::tr("Press a key or shortcut"));
             }
             if (held.isEmpty() && !candidate.isEmpty()) {
                 listening = false;
@@ -237,23 +238,23 @@ class Recorder : public QDialog {
         layout->setContentsMargins(24, 22, 24, 20);
         layout->setSpacing(16);
         auto *heading = new QHBoxLayout;
-        auto *titleLabel = new QLabel("Keyboard shortcut");
+        auto *titleLabel = new QLabel(I18n::tr("Keyboard shortcut"));
         titleLabel->setProperty("kind", "section");
         heading->addWidget(titleLabel, 1);
         auto *info = new QToolButton;
         info->setObjectName("infoButton");
         info->setText("i");
         info->setFixedSize(22, 22);
-        info->setAccessibleName("About shortcut recording");
-        const QString explanation =
+        info->setAccessibleName(I18n::tr("About shortcut recording"));
+        const QString explanation = I18n::tr(
             "Press a key with optional Ctrl, Shift, Alt or Super modifiers, then release it. "
             "Modifier keys can also be assigned on their own. Esc and Tab can be recorded; "
             "click Cancel to leave. Use Type shortcut to enter shortcuts reserved by your desktop. "
             "Assignments apply only while Fusion has focus. Printable keys use Fusion's keyboard layout; "
-            "characters unavailable in that layout cannot be sent.";
+            "characters unavailable in that layout cannot be sent.");
         info->setToolTip(explanation);
         connect(info, &QToolButton::clicked, this, [this, explanation] {
-            QMessageBox::information(this, "Shortcut recording", explanation);
+            QMessageBox::information(this, I18n::tr("Shortcut recording"), explanation);
         });
         heading->addWidget(info);
         layout->addLayout(heading);
@@ -273,13 +274,13 @@ class Recorder : public QDialog {
             if (!manual->isVisible()) return;
             candidate = parse(value);
             use->setEnabled(!candidate.isEmpty());
-            hint->setText(value.isEmpty() || !candidate.isEmpty() ? "" : "Enter one key or shortcut");
+            hint->setText(value.isEmpty() || !candidate.isEmpty() ? "" : I18n::tr("Enter one key or shortcut"));
         });
         hint->setProperty("kind", "muted");
         hint->setMinimumHeight(18);
         layout->addWidget(hint);
         auto *actions = new QHBoxLayout;
-        auto *again = new QPushButton("Record again");
+        auto *again = new QPushButton(I18n::tr("Record again"));
         again->setObjectName("record-again");
         connect(again, &QPushButton::clicked, this, [this] { reset(); });
         actions->addWidget(again);
@@ -290,7 +291,7 @@ class Recorder : public QDialog {
             held.clear();
             preview->hide();
             manual->show();
-            manualMode->setText("Record keys");
+            manualMode->setText(I18n::tr("Record keys"));
             hint->clear();
             manual->setText(candidate.isEmpty() ? "" : portable(candidate));
             candidate = parse(manual->text());
@@ -300,7 +301,7 @@ class Recorder : public QDialog {
         });
         actions->addWidget(manualMode);
         actions->addStretch();
-        auto *cancel = new QPushButton("Cancel");
+        auto *cancel = new QPushButton(I18n::tr("Cancel"));
         cancel->setObjectName("cancel-recording");
         connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
         actions->addWidget(cancel);

@@ -46,7 +46,7 @@ int main(int argc, char **) {
     }
     if (geteuid() != 0) {
         std::fprintf(stderr,
-                     "Administrator approval is required. Use Set up access in Fusion Manager.\n");
+                     "Administrator approval is required. Use Set up device access in Fusion Manager.\n");
         return 1;
     }
     int dir = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);

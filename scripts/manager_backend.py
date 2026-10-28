@@ -15,12 +15,14 @@ import time
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE.parent if (HERE.parent / 'install.sh').exists() else None
 SPACE = HERE.parent / 'spacemouse' if SOURCE else HERE / 'spacemouse'
+sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(SPACE))
 from processes import fusion_running
 from evdev_input import DEFAULTS, discover, settings
 from camera_gain import percentage_settings
 from camera_control import selected_status, runtime_dir
 from hidraw_input import discover as discover_hidraw
+import proton
 
 
 def atomic(path, value):
@@ -94,23 +96,8 @@ def repo_version(repo):
 
 
 def proton_versions():
-    roots = [Path.home() / p for p in ('.local/share/Steam', '.steam/root', '.steam/steam', '.var/app/com.valvesoftware.Steam/.local/share/Steam')]
-    steam = next((p for p in roots if p.is_dir()), None)
-    folders = list(roots)
-    for root in roots:
-        text = read(root / 'steamapps/libraryfolders.vdf')
-        folders += [Path(p.replace('\\\\', '\\')) for p in re.findall(r'"path"\s+"([^"]+)"', text)]
-    search = [p / sub for p in folders for sub in ('compatibilitytools.d', 'steamapps/common')]
-    search += [Path('/usr/share/steam/compatibilitytools.d')]
-    versions = {}
-    for root in search:
-        try:
-            for folder in root.iterdir():
-                if (folder / 'proton').is_file():
-                    versions[str(folder.resolve())] = {'name': folder.name, 'path': str(folder.resolve())}
-        except OSError:
-            pass
-    return str(steam) if steam else None, sorted(versions.values(), key=lambda p: p['name'].lower())
+    steam = proton.steam_root()
+    return str(steam) if steam else None, proton.installed()
 
 
 def find_fusion(app, prefix):

@@ -13,6 +13,7 @@ from unittest.mock import patch
 REPO=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(REPO/'scripts'))
 import manager_backend as manager
+import proton
 
 
 class ManagerTests(unittest.TestCase):
@@ -153,11 +154,23 @@ class ManagerTests(unittest.TestCase):
 
     def test_other_steam_library_proton_is_discovered(self):
         steam=self.root/'.local/share/Steam';(steam/'steamapps').mkdir(parents=True)
-        library=self.root/'other Steam library';proton=library/'steamapps/common/Proton Test';proton.mkdir(parents=True);(proton/'proton').touch()
+        library=self.root/'other Steam library';proton_dir=library/'steamapps/common/Proton Test';proton_dir.mkdir(parents=True);(proton_dir/'proton').touch()
         (steam/'steamapps/libraryfolders.vdf').write_text('"libraryfolders" { "1" { "path" "'+str(library)+'" } }')
         with patch.dict(os.environ,HOME=str(self.root)):
             found,versions=manager.proton_versions()
-        self.assertEqual(found,str(steam));self.assertIn(dict(name='Proton Test',path=str(proton)),versions)
+        self.assertEqual(found,str(steam));self.assertIn(dict(name='Proton Test',path=str(proton_dir)),versions)
+
+    def test_custom_proton_is_valid_without_a_steam_root(self):
+        custom=self.root/'Custom Proton';custom.mkdir();(custom/'proton').touch()
+        with patch.dict(os.environ,HOME=str(self.root/'home without Steam')):
+            self.assertEqual(proton.find('Not installed',custom),custom.resolve())
+
+    def test_name_discovery_does_not_stop_at_the_first_steam_root(self):
+        (self.root/'.local/share/Steam').mkdir(parents=True)
+        folder=self.root/'.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/Proton - Experimental'
+        folder.mkdir(parents=True);(folder/'proton').touch()
+        with patch.dict(os.environ,HOME=str(self.root)):
+            self.assertEqual(proton.find('Proton - Experimental'),folder.resolve())
 
 
 if __name__=='__main__':unittest.main()

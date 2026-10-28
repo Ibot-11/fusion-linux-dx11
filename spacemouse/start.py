@@ -191,7 +191,7 @@ def main():
                             selector.register(device, selectors.EVENT_READ, 'device')
                             warning = None if mode == 'hidraw' else ('Limited evdev fallback: no reliable HID report timing. '
                                        'Motion stops after 250 ms without an axis change. '
-                                       'Use Set up access to enable held motion.')
+                                       'Use Set up device access to enable held motion.')
                             state.update(connected=True, device=candidate, input_backend=mode,
                                          error=None, warning=warning, motion_watchdog=False)
                             break
@@ -201,7 +201,7 @@ def main():
                             device = decoder = mode = None
                             state['error'] = f"{candidate['path']}: {error}"
                 if device is None:
-                    message = ('Set up access: the Universal Receiver needs HID read permission.'
+                    message = ('Set up device access: the Universal Receiver needs HID read permission.'
                                if hid_devices else 'No readable SpaceMouse with a supported profile found.')
                     state.update(connected=False, device=None, input_backend=None, error=message)
             timeout = watchdog.wait(time.monotonic())
