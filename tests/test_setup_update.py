@@ -17,6 +17,10 @@ sys.path.insert(0, str(REPO / 'scripts'))
 import setup_runtime
 import update
 
+LANGUAGE_SPEC = importlib.util.spec_from_file_location('fusion_language', REPO / 'scripts/fusion-language.py')
+fusion_language = importlib.util.module_from_spec(LANGUAGE_SPEC)
+LANGUAGE_SPEC.loader.exec_module(fusion_language)
+
 
 def git(repo, *args):
     return subprocess.check_output(['git', '-C', str(repo), *args], text=True, stderr=subprocess.DEVNULL).strip()
@@ -147,6 +151,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertEqual(json.loads((self.app / 'repo-state.json').read_text())['version'], 'test-version')
         self.assertTrue(os.access(self.app / 'update.py', os.X_OK))
         self.assertTrue((self.app / 'proton.py').is_file())
+        self.assertTrue((self.app / 'fusion-language.py').is_file())
 
     def test_static_gpu_preferences_migrate_without_evaluating_shell(self):
         marker = self.app / 'must-not-exist'
@@ -391,6 +396,72 @@ class BrowserHandoffTests(unittest.TestCase):
         finally:
             process.terminate()
             process.wait(timeout=3)
+
+
+class FusionLanguageTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.app = self.root / 'app'
+        self.app.mkdir()
+        self.fusion = self.app / 'compatdata-exp-dx11/pfx/drive_c/users/steamuser/AppData/Local/Autodesk/webdeploy/production/hash/Fusion360.exe'
+        self.fusion.parent.mkdir(parents=True)
+        self.fusion.touch()
+        self.options = fusion_language.options_path(self.fusion)
+
+    def test_existing_options_are_updated_without_losing_settings(self):
+        self.options.parent.mkdir(parents=True)
+        source = ('<?xml version="1.0" encoding="UTF-16" standalone="no" ?>\n'
+                  '<OptionGroups><BootstrapOptionsGroup SchemaVersion="2">\n'
+                  '<LastVersionLaunched Value="2705.1.30"/>\n'
+                  '<userLanguageOptionId UserName="Sprache" Value="en-US"/>\n'
+                  '</BootstrapOptionsGroup></OptionGroups>\n')
+        self.options.write_bytes(source.encode('utf-16'))
+        with contextlib.redirect_stdout(io.StringIO()):
+            fusion_language.apply_language(self.fusion, 'de')
+        raw = self.options.read_bytes()
+        self.assertTrue(raw.startswith((b'\xff\xfe', b'\xfe\xff')))
+        text = raw.decode('utf-16')
+        self.assertIn('Value="de-DE"', text)
+        self.assertNotIn('Value="en-US"', text)
+        self.assertEqual(text.count('<userLanguageOptionId'), 1)
+        self.assertIn('<LastVersionLaunched Value="2705.1.30"/>', text)
+
+    def test_missing_language_and_missing_file_are_created_once(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            fusion_language.apply_language(self.fusion, 'en')
+        text = self.options.read_bytes().decode('utf-16')
+        self.assertIn('<userLanguageOptionId Value="en-US"/>', text)
+        with contextlib.redirect_stdout(io.StringIO()):
+            fusion_language.apply_language(self.fusion, 'de')
+        text = self.options.read_bytes().decode('utf-16')
+        self.assertIn('<userLanguageOptionId Value="de-DE"/>', text)
+        self.assertEqual(text.count('<userLanguageOptionId'), 1)
+
+    def test_launcher_uses_the_saved_manager_language(self):
+        app = self.app
+        shutil.copy2(REPO / 'scripts/launch.sh', app / 'launch.sh')
+        shutil.copy2(REPO / 'scripts/fusion-language.py', app / 'fusion-language.py')
+        (app / 'browser-listener.py').write_text('')
+        launched = self.root / 'launched'
+        (app / 'run-proton.sh').write_text(f'#!/bin/sh\nprintf "%s" "$1" > "{launched}"\n')
+        (app / 'run-proton.sh').chmod(0o755)
+        config = self.root / 'config/fusion-linux-dx11/Fusion Manager.conf'
+        config.parent.mkdir(parents=True)
+        config.write_text('[General]\nlanguage=de\n')
+        commands = self.root / 'commands'
+        commands.mkdir()
+        (commands / 'powerprofilesctl').write_text('#!/bin/sh\nexit 1\n')
+        (commands / 'powerprofilesctl').chmod(0o755)
+        env = dict(os.environ, FUSION_APP_DIR=str(app), HOME=str(self.root), XDG_CONFIG_HOME=str(self.root / 'config'),
+                   PATH=str(commands) + ':' + os.environ['PATH'])
+        env.pop('FUSION_LANGUAGE', None)
+        result = subprocess.run(['bash', str(app / 'launch.sh')], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(launched.read_text(), str(self.fusion))
+        text = self.options.read_bytes().decode('utf-16')
+        self.assertIn('Value="de-DE"', text)
 
 
 if __name__ == '__main__':

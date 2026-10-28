@@ -117,7 +117,7 @@ Start **Fusion Manager** from the application menu or run `fusion-manager`.
 - **Setup:** select the installation, prefix and Proton runtime.
 - **Activity:** inspect command output and open the log folder.
 
-Choose **English** or **Deutsch** in the sidebar and confirm the restart to change the Manager language.
+Choose **English** or **Deutsch** in the sidebar and confirm the restart. The selection changes the Manager and is applied to Fusion's user language at its next launch.
 
 To switch graphics profiles, close Fusion and run `./switch-mode.sh exp-dx11` or `./switch-mode.sh ge-opengl` from the installation folder. The OpenGL profile uses the newest installed GE-Proton and the `compatdata` prefix; `./switch-mode.sh status` shows the active selection.
 

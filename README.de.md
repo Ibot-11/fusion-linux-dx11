@@ -117,7 +117,7 @@ Für die Autodesk-Anmeldung werden HTTP-/HTTPS-Links über `xdg-open` mit dem St
 - **Einrichtung:** Installation, Prefix und Proton-Laufzeit auswählen.
 - **Aktivität:** Ausgaben einsehen und den Protokollordner öffnen.
 
-In der Seitenleiste **English** oder **Deutsch** wählen und den Neustart bestätigen, um die Manager-Sprache zu ändern.
+In der Seitenleiste **English** oder **Deutsch** wählen und den Neustart bestätigen. Die Auswahl ändert den Manager und wird beim nächsten Start auf die Fusion-Benutzersprache angewendet.
 
 Zum Wechseln des Grafikprofils Fusion schließen und im Installationsordner `./switch-mode.sh exp-dx11` oder `./switch-mode.sh ge-opengl` ausführen. Das OpenGL-Profil verwendet das neueste installierte GE-Proton und das `compatdata`-Prefix; `./switch-mode.sh status` zeigt die aktive Auswahl.
 

@@ -21,6 +21,22 @@ fi
 
 mkdir -p "$APP_DIR/logs"
 
+fusion_language="${FUSION_LANGUAGE:-}"
+manager_settings="${XDG_CONFIG_HOME:-$HOME/.config}/fusion-linux-dx11/Fusion Manager.conf"
+if [[ -z "$fusion_language" && -f "$manager_settings" ]]; then
+  fusion_language="$(sed -n 's/^language=//p' "$manager_settings" | head -n 1)"
+fi
+case "$fusion_language" in
+  de*) fusion_language=de ;;
+  en*) fusion_language=en ;;
+  *) fusion_language='' ;;
+esac
+if [[ -n "$fusion_language" && -f "$APP_DIR/fusion-language.py" ]]; then
+  if ! python3 "$APP_DIR/fusion-language.py" --fusion "$FUSION" --language "$fusion_language" >> "$APP_DIR/logs/fusion.log" 2>&1; then
+    printf 'Warning: Could not apply the selected Fusion language. See the Fusion log.\n' >&2
+  fi
+fi
+
 spacemouse_warning() {
   local message="$1"
   if command -v kdialog >/dev/null 2>&1 && kdialog --passivepopup "$message" 10; then

@@ -10,7 +10,7 @@ Native Qt 6 application for installing and launching Fusion, selecting Wine pref
 
 After installation, use the **Fusion Manager** application-menu entry or run `fusion-manager`.
 
-Choose **English** or **Deutsch** in the sidebar. Confirm the restart to apply the language; the selection is saved per user. Without a saved selection, German is used for German system locales and English otherwise.
+Choose **English** or **Deutsch** in the sidebar. Confirm the restart to apply the language; the selection is saved per user and is also applied to Fusion at its next launch. Without a saved selection, German is used for German system locales and English otherwise.
 
 ## Pages
 

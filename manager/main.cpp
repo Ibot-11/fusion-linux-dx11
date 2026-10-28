@@ -1000,7 +1000,7 @@ class Manager : public QMainWindow {
         }
         QMessageBox confirmation(this);
         confirmation.setWindowTitle(I18n::tr("Change language"));
-        confirmation.setText(I18n::tr("Restart Fusion Manager to apply the language change?"));
+        confirmation.setText(I18n::tr("Restart Fusion Manager to apply the language change to the Manager and Fusion?"));
         confirmation.setIcon(QMessageBox::Question);
         auto *restart = confirmation.addButton(I18n::tr("Restart now"), QMessageBox::AcceptRole);
         confirmation.addButton(I18n::tr("Cancel"), QMessageBox::RejectRole);
@@ -1083,6 +1083,8 @@ class Manager : public QMainWindow {
         railLayout->addWidget(nav, 1);
         railLayout->addWidget(label(I18n::tr("Language"), "railnote"));
         language->setObjectName("language");
+        language->setAccessibleName(I18n::tr("Language"));
+        language->setToolTip(I18n::tr("Applies to Fusion Manager and Fusion at the next launch."));
         language->addItem("English", "en");
         language->addItem("Deutsch", "de");
         restoreLanguageSelection();

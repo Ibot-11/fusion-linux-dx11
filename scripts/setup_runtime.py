@@ -16,7 +16,8 @@ sys.path.insert(0, str(REPO / "spacemouse"))
 from processes import fusion_running
 
 RUNTIME_FILES = ("launch.sh", "run-proton.sh", "switch-mode.sh", "browser-listener.py",
-                 "browser-request.py", "callback.py", "window-fix.py", "update.py", "proton.py", "manager_backend.py", "manager.sh")
+                 "browser-request.py", "callback.py", "window-fix.py", "update.py", "proton.py",
+                 "fusion-language.py", "manager_backend.py", "manager.sh")
 SPACE_HELPERS = ("start.py", "evdev_input.py", "keybindings.py", "camera_control.py", "hidraw_input.py", "processes.py", "control.py", "install-sdk.py",
                  "camera_gain.py", "camera-settings.sh", "settings.sh")
 MANAGED = (*RUNTIME_FILES, "processes.py", "panel-fix.exe", "panel-fix.c",
