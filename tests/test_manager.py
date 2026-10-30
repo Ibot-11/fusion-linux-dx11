@@ -20,7 +20,7 @@ class ManagerTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name);self.app=self.root/'Fusion user installation';self.app.mkdir()
-        self.args=argparse.Namespace(action='status',prefix=None,proton=None,installer=None,spacemouse=False,settings=None,percent=None)
+        self.args=argparse.Namespace(action='status',prefix=None,proton=None,installer=None,spacemouse=False,settings=None,percent=None,scale=None,screen_scale=1.0)
 
     def action(self,name,**values):
         self.args.action=name
@@ -55,7 +55,7 @@ class ManagerTests(unittest.TestCase):
 
     def test_running_fusion_blocks_install_profile_launch_and_sdk_mutation(self):
         with patch.object(manager,'fusion_running',return_value=True),patch.object(manager,'run') as run:
-            for name in ('install','patch','apply','update','profile','enable','disable','launch'):
+            for name in ('install','patch','apply','update','profile','enable','disable','launch','scale'):
                 with self.subTest(action=name),self.assertRaises(ValueError):self.action(name)
             run.assert_not_called()
         self.assertEqual(list(self.app.iterdir()),[])
@@ -71,6 +71,29 @@ class ManagerTests(unittest.TestCase):
         original=(self.app/'spacemouse/device.json').read_bytes()
         with self.assertRaises(ValueError):self.action('settings',settings='{"deadzone":999}')
         self.assertEqual((self.app/'spacemouse/device.json').read_bytes(),original)
+
+    def test_scale_action_applies_to_the_selected_prefix_and_is_reported(self):
+        prefix = self.app/'chosen';prefix.joinpath('pfx').mkdir(parents=True)
+        prefix.joinpath('pfx/user.reg').write_text('[Control Panel\\\\Desktop] 1\n"LogPixels"=dword:00000060\n[Software\\\\Wine\\\\Fonts] 1\n"LogPixels"=dword:00000060\n')
+        (self.app/'prefix-dir').write_text('chosen\n')
+        with patch.object(manager,'fusion_running',return_value=False):
+            self.action('scale',scale='auto',screen_scale=1.45)
+        self.assertEqual((self.app/'fusion-scale').read_text(),'auto\n')
+        self.assertEqual((self.app/'fusion-dpi').read_text(),'144\n')
+        self.assertEqual(manager.fusion_scale.read_dpi(prefix),144)
+        with patch.object(manager,'proton_versions',return_value=(None,[])),patch.object(manager,'discover_hidraw',return_value=[]),patch.object(manager,'discover',return_value=[]),patch.object(manager,'fusion_running',return_value=False):
+            state=manager.status(self.app,REPO)
+        self.assertTrue(state['prefix_exists']);self.assertEqual(state['scale_mode'],'auto');self.assertEqual(state['scale_percent'],150)
+
+    def test_scale_action_updates_the_live_wine_registry_when_runtime_is_available(self):
+        prefix=self.app/'chosen';prefix.joinpath('pfx').mkdir(parents=True)
+        prefix.joinpath('pfx/user.reg').write_text('[Control Panel\\\\Desktop] 1\n"LogPixels"=dword:00000060\n[Software\\\\Wine\\\\Fonts] 1\n"LogPixels"=dword:00000060\n')
+        calls=self.root/'scale-calls'
+        (self.app/'run-proton.sh').write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{calls}"\n')
+        with patch.object(manager,'fusion_running',return_value=False):
+            self.action('scale',prefix='chosen',scale='150',screen_scale=1.0)
+        self.assertEqual(calls.read_text().splitlines(),['--set-dpi','144'])
+        self.assertEqual((self.app/'fusion-dpi').read_text(),'144\n')
 
     def test_update_keeps_existing_disabled_state_instead_of_forcing_enable(self):
         with patch.object(manager,'fusion_running',return_value=False),patch.object(manager,'run') as run:self.action('update',spacemouse=True)

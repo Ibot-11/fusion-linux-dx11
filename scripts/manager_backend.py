@@ -23,6 +23,7 @@ from camera_gain import percentage_settings
 from camera_control import selected_status, runtime_dir
 from hidraw_input import discover as discover_hidraw
 import proton
+import fusion_scale
 
 
 def atomic(path, value):
@@ -146,9 +147,14 @@ def setup_device_access():
 
 def status(app, repo):
     prefix = read(app / 'prefix-dir', 'compatdata-exp-dx11')
+    try:
+        prefix = valid_prefix(prefix)
+        prefix_path = app / prefix
+    except ValueError:
+        prefix_path = None
     error = None
     try:
-        fusion = find_fusion(app, prefix)
+        fusion = find_fusion(app, prefix_path.name if prefix_path else prefix)
     except ValueError as problem:
         fusion = None
         error = str(problem)
@@ -175,7 +181,20 @@ def status(app, repo):
     if not isinstance(camera, dict):
         camera = {'percent': 25}
         error = 'Invalid saved camera configuration.'
+    scale_dpi = fusion_scale.read_dpi(prefix_path) if prefix_path else None
+    scale_percent = fusion_scale.nearest_percent(scale_dpi) if scale_dpi else None
+    scale_mode = read(app / 'fusion-scale', str(scale_percent) if scale_percent else 'auto')
+    if scale_mode not in ('auto', '100', '125', '150', '175', '200'):
+        scale_mode = str(scale_percent) if scale_percent else 'auto'
+    try:
+        scale_target_dpi = int(read(app / 'fusion-dpi', ''))
+    except ValueError:
+        scale_target_dpi = None
     return {'app': str(app), 'exists': app.is_dir(), 'integration_exists': (app / 'launch.sh').is_file(), 'prefix': prefix, 'prefixes': prefixes,
+            'prefix_exists': bool(prefix_path and (prefix_path / 'pfx').is_dir()),
+            'scale_mode': scale_mode, 'scale_dpi': scale_dpi, 'scale_percent': scale_percent,
+            'scale_target_dpi': scale_target_dpi,
+            'scale_target_percent': fusion_scale.nearest_percent(scale_target_dpi) if scale_target_dpi else None,
             'proton': read(app / 'proton-version', 'Proton - Experimental'),
             'proton_path': read(app / 'proton-path'), 'protons': protons, 'steam': steam,
             'fusion': str(fusion) if fusion else None, 'fusion_version': fusion_version(fusion),
@@ -253,6 +272,21 @@ def action(args, app, repo):
         atomic(app / 'proton-version', proton.name + '\n')
         atomic(app / 'proton-path', str(proton) + '\n')
         print('Prefix and Proton saved.', flush=True)
+    elif name == 'scale':
+        closed()
+        prefix = valid_prefix(args.prefix or read(app / 'prefix-dir', 'compatdata-exp-dx11'))
+        mode = args.scale or 'auto'
+        dpi = fusion_scale.dpi_for(mode, args.screen_scale)
+        runtime = app / 'run-proton.sh'
+        if runtime.is_file():
+            subprocess.run(['bash', str(runtime), '--set-dpi', str(dpi)],
+                           env=dict(os.environ, FUSION_APP_DIR=str(app), FUSION_PREFIX_DIR=prefix), check=True)
+            fusion_scale.write_dpi(app / prefix, dpi)
+        else:
+            fusion_scale.apply(app / prefix, mode, args.screen_scale)
+        atomic(app / 'fusion-scale', mode + '\n')
+        atomic(app / 'fusion-dpi', str(dpi) + '\n')
+        print('Restart Fusion to apply the display scaling.', flush=True)
     elif name == 'settings':
         value = json.loads(args.settings)
         if not isinstance(value, dict):
@@ -306,6 +340,8 @@ def main():
     parser.add_argument('--spacemouse', action='store_true')
     parser.add_argument('--settings')
     parser.add_argument('--percent', type=int)
+    parser.add_argument('--scale', choices=('auto', '100', '125', '150', '175', '200'))
+    parser.add_argument('--screen-scale', type=float, default=1.0)
     args = parser.parse_args()
     app = args.target.expanduser().resolve()
     state = read_json(app / 'repo-state.json')

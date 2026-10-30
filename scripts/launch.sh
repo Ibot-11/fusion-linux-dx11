@@ -37,6 +37,23 @@ if [[ -n "$fusion_language" && -f "$APP_DIR/fusion-language.py" ]]; then
   fi
 fi
 
+scale_dpi="$(cat "$APP_DIR/fusion-dpi" 2>/dev/null || true)"
+if [[ -z "$scale_dpi" ]]; then
+  case "$(cat "$APP_DIR/fusion-scale" 2>/dev/null || true)" in
+    100) scale_dpi=96 ;;
+    125) scale_dpi=120 ;;
+    150) scale_dpi=144 ;;
+    175) scale_dpi=168 ;;
+    200) scale_dpi=192 ;;
+  esac
+fi
+if [[ -n "$scale_dpi" ]]; then
+  if ! FUSION_APP_DIR="$APP_DIR" FUSION_PREFIX_DIR="$PREFIX_DIR" \
+      "$APP_DIR/run-proton.sh" --set-dpi "$scale_dpi" >> "$APP_DIR/logs/fusion.log" 2>&1; then
+    printf 'Warning: Could not apply the selected Fusion UI scale. See the Fusion log.\n' >&2
+  fi
+fi
+
 spacemouse_warning() {
   local message="$1"
   if command -v kdialog >/dev/null 2>&1 && kdialog --passivepopup "$message" 10; then

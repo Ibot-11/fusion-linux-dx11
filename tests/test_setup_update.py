@@ -20,6 +20,9 @@ import update
 LANGUAGE_SPEC = importlib.util.spec_from_file_location('fusion_language', REPO / 'scripts/fusion-language.py')
 fusion_language = importlib.util.module_from_spec(LANGUAGE_SPEC)
 LANGUAGE_SPEC.loader.exec_module(fusion_language)
+SCALE_SPEC = importlib.util.spec_from_file_location('fusion_scale', REPO / 'scripts/fusion_scale.py')
+fusion_scale = importlib.util.module_from_spec(SCALE_SPEC)
+SCALE_SPEC.loader.exec_module(fusion_scale)
 
 
 def git(repo, *args):
@@ -152,6 +155,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertTrue(os.access(self.app / 'update.py', os.X_OK))
         self.assertTrue((self.app / 'proton.py').is_file())
         self.assertTrue((self.app / 'fusion-language.py').is_file())
+        self.assertTrue((self.app / 'fusion_scale.py').is_file())
 
     def test_static_gpu_preferences_migrate_without_evaluating_shell(self):
         marker = self.app / 'must-not-exist'
@@ -462,6 +466,79 @@ class FusionLanguageTests(unittest.TestCase):
         self.assertEqual(launched.read_text(), str(self.fusion))
         text = self.options.read_bytes().decode('utf-16')
         self.assertIn('Value="de-DE"', text)
+
+
+class FusionScaleTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.app = self.root / 'app'
+        self.app.mkdir()
+        self.prefix = self.app / 'compatdata-exp-dx11'
+        (self.prefix / 'pfx').mkdir(parents=True)
+        self.fusion = self.prefix / 'pfx/drive_c/users/steamuser/AppData/Local/Autodesk/webdeploy/production/hash/Fusion360.exe'
+        self.fusion.parent.mkdir(parents=True)
+        self.fusion.touch()
+        self.registry = self.prefix / 'pfx/user.reg'
+        self.registry.write_text(
+            'WINE REGISTRY Version 2\n\n'
+            '[Control Panel\\\\Desktop] 1792861744\n'
+            '"LogPixels"=dword:00000090\n'
+            '"Win8DpiScaling"=dword:00000001\n\n'
+            '[Software\\\\Wine\\\\Fonts] 1793394577\n'
+            '"LogPixels"=dword:00000090\n'
+            '[Software\\\\Example] 1793394577\n'
+            '"Keep"="unchanged"\n')
+
+    def test_updates_both_dpi_values_and_preserves_other_settings(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(fusion_scale.apply(self.prefix, '125'), 125)
+        text = self.registry.read_text()
+        self.assertEqual(text.count('"LogPixels"=dword:00000078'), 2)
+        self.assertIn('"Win8DpiScaling"=dword:00000001', text)
+        self.assertIn('"Keep"="unchanged"', text)
+        self.assertEqual(fusion_scale.read_dpi(self.prefix), 120)
+
+    def test_automatic_scale_uses_the_reported_primary_display(self):
+        self.assertEqual(fusion_scale.dpi_for('auto', 1.0), 96)
+        self.assertEqual(fusion_scale.dpi_for('auto', 1.45), 144)
+        self.assertEqual(fusion_scale.dpi_for('auto', 1.5), 144)
+        self.assertEqual(fusion_scale.dpi_for('auto', 2.0), 192)
+        with self.assertRaises(ValueError):
+            fusion_scale.dpi_for('auto', 0.5)
+
+    def test_missing_dpi_sections_are_added_once(self):
+        self.registry.write_text('WINE REGISTRY Version 2\n\n[Software\\\\Example] 1\n"Keep"="yes"\n')
+        with contextlib.redirect_stdout(io.StringIO()):
+            fusion_scale.apply(self.prefix, '100')
+        text = self.registry.read_text()
+        self.assertEqual(text.count('"LogPixels"=dword:00000060'), 2)
+        self.assertIn('"Keep"="yes"', text)
+        self.assertEqual(fusion_scale.read_dpi(self.prefix), 96)
+
+    def test_uninitialized_prefix_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'not initialized'):
+            fusion_scale.apply(self.root / 'missing', '100')
+
+    def test_launcher_reapplies_the_saved_dpi_to_the_live_registry(self):
+        app = self.app
+        shutil.copy2(REPO / 'scripts/launch.sh', app / 'launch.sh')
+        (app / 'browser-listener.py').write_text('')
+        (app / 'fusion-dpi').write_text('144\n')
+        calls = self.root / 'calls'
+        (app / 'run-proton.sh').write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{calls}"\n')
+        (app / 'run-proton.sh').chmod(0o755)
+        commands = self.root / 'commands'
+        commands.mkdir()
+        (commands / 'powerprofilesctl').write_text('#!/bin/sh\nexit 1\n')
+        (commands / 'powerprofilesctl').chmod(0o755)
+        env = dict(os.environ, FUSION_APP_DIR=str(app), HOME=str(self.root), XDG_CONFIG_HOME=str(self.root / 'config'),
+                   PATH=str(commands) + ':' + os.environ['PATH'])
+        env.pop('FUSION_LANGUAGE', None)
+        result = subprocess.run(['bash', str(app / 'launch.sh')], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls.read_text().splitlines(), ['--set-dpi 144', str(self.fusion)])
 
 
 if __name__ == '__main__':

@@ -116,7 +116,8 @@ class Manager : public QMainWindow {
     QString backend, screenshot, currentAction;
     bool smoke = false, loaded = false, busy = false;
     QLineEdit *target = new QLineEdit, *repo = new QLineEdit, *installer = new QLineEdit;
-    QComboBox *prefix = new QComboBox, *proton = new QComboBox, *language = new QComboBox;
+    QComboBox *prefix = new QComboBox, *proton = new QComboBox, *language = new QComboBox,
+              *fusionScale = new QComboBox;
     QCheckBox *withSpace = new QCheckBox(I18n::tr("Include SpaceMouse"));
     QLabel *headline = label(I18n::tr("Checking…"), "badge"), *subtitle = label("", "muted"),
            *fusionInfo = label("", "detail"), *repoInfo = label("", "detail");
@@ -129,7 +130,8 @@ class Manager : public QMainWindow {
     QLabel *inputAccessInfo = label("", "warning"), *inputStateInfo = label("", "muted");
     QWidget *accessPanel = new QWidget;
     QPushButton *cloneButton = nullptr;
-    QLabel *result = label(I18n::tr("Ready"), "muted"), *cameraHint = label(I18n::tr("Saved for next launch"), "muted");
+    QLabel *result = label(I18n::tr("Ready"), "muted"), *cameraHint = label(I18n::tr("Saved for next launch"), "muted"),
+           *scaleHint = label(I18n::tr("Not applied"), "muted");
     QPlainTextEdit *log = new QPlainTextEdit;
     QProgressBar *progress = new QProgressBar;
     QSpinBox *deadzone = new QSpinBox, *camera = new QSpinBox;
@@ -144,8 +146,12 @@ class Manager : public QMainWindow {
     QByteArray statusBytes;
     QTimer refresh, liveRefresh;
 
-    static void selectButtonBinding(QComboBox *combo, const QJsonValue &binding) {
-        int selected = -1, custom = -1;
+    static double primaryDisplayScale() {
+        const auto *screen = QGuiApplication::primaryScreen();
+        return qBound(1.0, screen ? screen->devicePixelRatio() : 1.0, 2.0);
+    }
+
+    static void selectButtonBinding(QComboBox *combo, const QJsonValue &binding) {        int selected = -1, custom = -1;
         for (int i = 0; i < combo->count(); ++i) {
             if (combo->itemData(i, Qt::UserRole + 1).toBool()) custom = i;
             if (QJsonValue::fromVariant(combo->itemData(i)) == binding) selected = i;
@@ -299,6 +305,9 @@ class Manager : public QMainWindow {
             extra << "--percent" << QString::number(camera->value());
         else if (action == "profile")
             extra << "--prefix" << prefix->currentText() << "--proton" << proton->currentData().toString();
+        else if (action == "scale")
+            extra << "--scale" << fusionScale->currentData().toString() << "--screen-scale"
+                  << QString::number(primaryDisplayScale(), 'f', 3);
         else if (action == "install" || action == "patch" || action == "apply" || action == "update") {
             if (withSpace->isChecked())
                 extra << "--spacemouse";
@@ -473,6 +482,23 @@ class Manager : public QMainWindow {
                                : needsAccess        ? I18n::tr("Device access required")
                                                     : I18n::tr("Receiver detected"));
         overviewCamera->setText(I18n::tr("Camera %1%").arg(s["camera"].toObject()["percent"].toInt(25)));
+        if (!s["prefix_exists"].toBool()) {
+            scaleHint->setText(I18n::tr("Select an initialized Wine prefix."));
+        } else if (!s["scale_dpi"].isDouble()) {
+            scaleHint->setText(I18n::tr("No Windows DPI value is available in this prefix."));
+        } else {
+            const int percent = s["scale_percent"].toInt();
+            const int target = s["scale_target_percent"].toInt();
+            if (target > 0 && target != percent)
+                scaleHint->setText(I18n::tr("Selected: %1 % · Current Windows DPI: %2 % · "
+                                            "The selection is applied again at the next Fusion launch")
+                                       .arg(target)
+                                       .arg(percent));
+            else
+                scaleHint->setText(text(s, "scale_mode") == "auto"
+                                       ? I18n::tr("Automatic · current Windows DPI: %1 %").arg(percent)
+                                       : I18n::tr("Current Windows DPI: %1 %").arg(percent));
+        }
 
         if (!loaded) {
             if (repo->text().isEmpty())
@@ -491,6 +517,9 @@ class Manager : public QMainWindow {
                     proton->setCurrentIndex(proton->count() - 1);
             }
             withSpace->setChecked(s["spacemouse_installed"].toBool() || !present);
+            const int scaleIndex = fusionScale->findData(text(s, "scale_mode", "auto"));
+            if (scaleIndex >= 0)
+                fusionScale->setCurrentIndex(scaleIndex);
             const auto config = s["device_config"].toObject();
             deadzone->setValue(config["deadzone"].toInt());
             for (int i = 0; i < 6; ++i) {
@@ -526,7 +555,7 @@ class Manager : public QMainWindow {
                 reason = I18n::tr("Fusion is not installed yet.");
             else if (running &&
                      (action == "update" || action == "install" || action == "patch" || action == "apply" ||
-                      action == "profile" || action == "enable" || action == "disable"))
+                      action == "profile" || action == "scale" || action == "enable" || action == "disable"))
                 reason = I18n::tr("Close Fusion before making this change.");
             else if ((action == "driver-start" || action == "driver-stop" || action == "enable" ||
                       action == "disable") &&
@@ -547,8 +576,10 @@ class Manager : public QMainWindow {
                 reason = I18n::tr("Select a valid checkout first.");
             else if (action == "update" && !r["upstream"].isString())
                 reason = I18n::tr("No update source is configured for this branch.");
+            else if (action == "scale" && !last["prefix_exists"].toBool())
+                reason = I18n::tr("The selected Wine prefix does not exist yet.");
             widget->setEnabled(reason.isEmpty());
-            widget->setToolTip(reason);
+            widget->setToolTip(reason.isEmpty() ? widget->property("help").toString() : reason);
         }
     }
 
@@ -840,6 +871,36 @@ class Manager : public QMainWindow {
                            "use a new prefix name; applying a runtime selection requires an existing prefix."),
                   runtime));
         mutationControls << prefix << proton;
+
+        auto *display = new QVBoxLayout;
+        auto *scaleForm = new QFormLayout;
+        scaleForm->setHorizontalSpacing(20);
+        fusionScale->setObjectName("fusion-scale");
+        fusionScale->setProperty("action", "scale");
+        fusionScale->addItem(I18n::tr("Automatic"), "auto");
+        for (const QString &percent : QStringList{"100", "125", "150", "175", "200"})
+            fusionScale->addItem(I18n::tr("%1 %").arg(percent), percent);
+        fusionScale->setToolTip(I18n::tr(
+            "Automatic uses the primary display scale reported to the Manager when scaling is applied."));
+        fusionScale->setProperty("help", fusionScale->toolTip());
+        connect(fusionScale, qOverload<int>(&QComboBox::activated), this, [this] {
+            scaleHint->setText(I18n::tr("Selection not applied · Close Fusion and choose Apply scaling"));
+        });
+        scaleForm->addRow(I18n::tr("Fusion UI scale"), fusionScale);
+        display->addLayout(scaleForm);
+        display->addWidget(scaleHint);
+        auto *scaleRow = new QHBoxLayout;
+        scaleRow->addStretch();
+        scaleRow->addWidget(actionButton(I18n::tr("Apply scaling"), "scale"));
+        display->addLayout(scaleRow);
+        layout->addWidget(panel(
+            I18n::tr("Scaling"),
+            I18n::tr("Fusion uses a Windows DPI value from the selected Wine prefix. Close Fusion, choose a "
+                     "scaling value and apply it. Automatic follows the primary display's current desktop scale. "
+                     "A restart of Fusion is required; the saved value is enforced on every start and other "
+                     "prefixes are not changed."),
+            display));
+        mutationControls << fusionScale;
 
         auto *installation = new QVBoxLayout;
         auto *installRow = new QHBoxLayout;
@@ -1154,6 +1215,8 @@ class Manager : public QMainWindow {
                                         : I18n::tr("Action failed · See Activity"));
                     if (code == 0 && currentAction == "setup-access")
                         result->setText(I18n::tr("Device access prepared · Reconnect the receiver"));
+                    if (code == 0 && currentAction == "scale")
+                        result->setText(I18n::tr("Scaling saved · Restart Fusion"));
                     log->appendPlainText("\n" + I18n::tr("Exit code: %1").arg(code));
                     loaded = false;
                     requestStatus();

@@ -9,6 +9,7 @@ Run Autodesk Fusion on Linux with Proton, DXVK and a native Qt Manager. The proj
 - DirectX 11 rendering with Proton Experimental and DXVK
 - Graphical installation, updates and runtime selection with Fusion Manager
 - Isolated Wine prefixes and an OpenGL fallback profile
+- Configurable Fusion UI scaling, automatic or from 100 % to 200 %
 - Optional SpaceMouse axes, buttons and camera-speed controls
 - English and German Manager interface
 
@@ -114,12 +115,14 @@ Start **Fusion Manager** from the application menu or run `fusion-manager`.
 
 - **Overview:** start Fusion, inspect versions and update the Linux integration.
 - **SpaceMouse:** configure axes, shortcuts and camera speed.
-- **Setup:** select the installation, prefix and Proton runtime.
+- **Setup:** select the installation, prefix, Proton runtime and Fusion UI scaling.
 - **Activity:** inspect command output and open the log folder.
 
 Choose **English** or **Deutsch** in the sidebar and confirm the restart. The selection changes the Manager and is applied to Fusion's user language at its next launch.
 
 To switch graphics profiles, close Fusion and run `./switch-mode.sh exp-dx11` or `./switch-mode.sh ge-opengl` from the installation folder. The OpenGL profile uses the newest installed GE-Proton and the `compatdata` prefix; `./switch-mode.sh status` shows the active selection.
+
+On high-DPI displays, configure the Fusion interface under **Setup → Scaling**. **Automatic** follows the primary display scale; fixed values from 100 % to 200 % are also available. Fusion must be closed while applying the change.
 
 ## Updates
 

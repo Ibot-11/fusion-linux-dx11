@@ -55,6 +55,23 @@ export WINEDEBUG=-all
 
 mkdir -p "$STEAM_COMPAT_DATA_PATH" "$DXVK_LOG_PATH"
 
+if [[ "${1:-}" == --set-dpi ]]; then
+  DPI="${2:-}"
+  case "$DPI" in 96|120|144|168|192) ;; *)
+    echo "Error: unsupported Fusion DPI value '$DPI'." >&2
+    exit 2
+  esac
+  export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
+  export LD_LIBRARY_PATH="$PROTON_DIR/files/lib/x86_64-linux-gnu:$PROTON_DIR/files/lib/i386-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  export WINEDLLPATH="$PROTON_DIR/files/lib/vkd3d:$PROTON_DIR/files/lib/wine${WINEDLLPATH:+:$WINEDLLPATH}"
+  export WINENTSYNC=1 WINEESYNC=1 WINEFSYNC=1
+  WINE="$PROTON_DIR/files/bin/wine"
+  "$WINE" reg add "HKEY_CURRENT_USER\\Control Panel\\Desktop" /v LogPixels /t REG_DWORD /d "$DPI" /f >/dev/null
+  "$WINE" reg add "HKEY_CURRENT_USER\\Software\\Wine\\Fonts" /v LogPixels /t REG_DWORD /d "$DPI" /f >/dev/null
+  echo "Fusion UI scale set to $DPI DPI."
+  exit 0
+fi
+
 if [[ "${1:-}" == --panel-fix ]]; then
   shift
   for _ in {1..60}; do

@@ -16,7 +16,7 @@ Choose **English** or **Deutsch** in the sidebar. Confirm the restart to apply t
 
 - **Overview:** Fusion and integration versions, launch, repository status and updates.
 - **SpaceMouse:** device status, axes, button shortcuts and camera speed.
-- **Setup:** installation folder, source checkout, prefix, Proton and installation actions.
+- **Setup:** installation folder, source checkout, prefix, Proton and Fusion UI scaling.
 - **Activity:** operation output and log-folder access.
 
 A different installation can be selected in **Setup → Change folders** or on the command line:
@@ -34,6 +34,12 @@ A new installation downloads Autodesk's official installer unless an existing in
 Replaced runtime files are backed up under `backups/updates`. Prefixes, documents and Proton, GPU, DXVK and SpaceMouse preferences are preserved. Fusion itself continues to use Autodesk's updater.
 
 Close Fusion before installation, integration updates, SDK changes or runtime changes. Camera speed can be applied while Fusion is running; if live control is unavailable, it takes effect at the next launch. Only one Manager operation runs at a time, and the window cannot be closed during an active operation.
+
+## Fusion display scaling
+
+Fusion takes its interface scale from the Windows DPI stored in the selected Wine prefix. Open **Setup → Scaling**, close Fusion, choose **Automatic** or a fixed value from 100 % to 200 %, then choose **Apply scaling**. Automatic uses the primary display scale reported when it is applied. A 1080p display at 100 % normally uses 100 %; a 4K display at 150 % uses 150 %.
+
+The setting is stored for the selected prefix, applied through Wine's live registry and re-applied whenever Fusion starts. It takes effect after Fusion is restarted. Other prefixes and the Linux desktop scaling are not changed.
 
 ## SpaceMouse access and shortcuts
 
