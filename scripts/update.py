@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Update the source checkout with a fast-forward, then run its new installer."""
 import argparse
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 
@@ -52,6 +55,30 @@ def checkout_for_installation(app):
     return source
 
 
+@contextmanager
+def update_guard(app):
+    marker = app / "clean-install.json"
+    try:
+        marker.lstat()
+    except FileNotFoundError:
+        yield
+        return
+    try:
+        with (app / ".install.lock").open("r") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            path_info = (app / ".install.lock").lstat()
+            held = os.fstat(lock.fileno())
+            if not stat.S_ISREG(path_info.st_mode) or (path_info.st_dev, path_info.st_ino) != (held.st_dev, held.st_ino):
+                raise ValueError("The installation lock is invalid or was replaced.")
+            from manager_backend import clean_install
+            state = clean_install(app)
+            if not state or not state.get("valid") or state.get("phase") != "complete":
+                raise ValueError("The clean installation is unfinished or invalid. Resume it before updating.")
+            yield
+    except (BlockingIOError, ImportError) as error:
+        raise ValueError("The installation is busy or its status cannot be verified.") from error
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path)
@@ -68,7 +95,8 @@ def main():
         target = args.target.expanduser().resolve()
         if not target.is_dir():
             raise ValueError("The installation to update does not exist.")
-        repo = pull_checkout(args.repo or checkout_for_installation(target))
+        with update_guard(target):
+            repo = pull_checkout(args.repo or checkout_for_installation(target))
         command = ["bash", str(repo / "install.sh"), "--apply-update", str(target)]
         if args.with_spacemouse:
             command.append("--with-spacemouse")

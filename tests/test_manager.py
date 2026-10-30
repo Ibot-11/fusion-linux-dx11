@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,7 @@ class ManagerTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name);self.app=self.root/'Fusion user installation';self.app.mkdir()
-        self.args=argparse.Namespace(action='status',prefix=None,proton=None,installer=None,spacemouse=False,settings=None,percent=None,scale=None,screen_scale=1.0)
+        self.args=argparse.Namespace(action='status',prefix=None,proton=None,installer=None,spacemouse=False,settings=None,percent=None,scale=None,screen_scale=1.0,expected_clean=None)
 
     def action(self,name,**values):
         self.args.action=name
@@ -106,6 +107,172 @@ class ManagerTests(unittest.TestCase):
             self.action('install',prefix='custom',proton='/custom/Proton with spaces',installer=str(installer),spacemouse=True)
         command=[str(x) for x in run.call_args.args[0]]
         self.assertIn('--clean',command);self.assertIn('--with-spacemouse',command);self.assertIn(str(installer),command);self.assertIn('/custom/Proton with spaces',command)
+
+    def marker(self, phase='installer-running', **overrides):
+        state=dict(phase=phase,prefix='saved-prefix',proton_path='/saved/Proton with spaces',spacemouse=True,installer='/saved/installer.exe')
+        state.update(overrides)
+        (self.app/'clean-install.json').write_text(json.dumps(state))
+        return state
+
+    def manager_status(self):
+        with patch.object(manager,'proton_versions',return_value=(None,[])),patch.object(manager,'discover_hidraw',return_value=[]),patch.object(manager,'discover',return_value=[]),patch.object(manager,'fusion_running',return_value=False):
+            return manager.status(self.app,REPO)
+
+    def test_legacy_installation_without_marker_is_not_changed(self):
+        folder=self.app/'prefix/pfx/drive_c/users/user/AppData/Local/Autodesk/webdeploy/production/hash';folder.mkdir(parents=True)
+        exe=folder/'Fusion360.exe';exe.touch();(self.app/'prefix-dir').write_text('prefix\n')
+        before=sorted(str(p.relative_to(self.app)) for p in self.app.rglob('*'))
+        state=self.manager_status()
+        self.assertIsNone(state['clean_install']);self.assertEqual(state['fusion'],str(exe))
+        with patch.object(manager,'fusion_running',return_value=False),patch.object(manager,'run') as run:
+            self.action('apply')
+            self.assertIn('--apply-update',[str(x) for x in run.call_args.args[0]])
+        self.assertEqual(before,sorted(str(p.relative_to(self.app)) for p in self.app.rglob('*')))
+
+    def test_status_reports_all_marker_phases_and_uses_saved_prefix(self):
+        (self.app/'prefix-dir').write_text('old-dialog-prefix\n')
+        exe=self.app/'saved-prefix/pfx/drive_c/users/user/AppData/Local/Autodesk/webdeploy/production/hash/Fusion360.exe'
+        exe.parent.mkdir(parents=True);exe.touch()
+        for phase in ('prepared','prefix-ready','installer-running','installer-complete','complete'):
+            with self.subTest(phase=phase):
+                marker=self.marker(phase)
+                state=self.manager_status()
+                self.assertEqual(state['clean_install'],dict(marker,valid=True))
+                self.assertEqual(state['prefix'],'old-dialog-prefix' if phase=='complete' else 'saved-prefix')
+                if phase!='complete':
+                    self.assertEqual(state['fusion'],str(exe))
+                    self.assertEqual(state['proton_path'],'/saved/Proton with spaces')
+                    self.assertEqual(state['proton'],'Proton with spaces')
+
+    def test_invalid_markers_are_not_legacy_or_resumable(self):
+        for content in ('not json','[]','{}',json.dumps(dict(phase='unknown',prefix='p',proton_path='/p',spacemouse=True)),
+                        json.dumps(dict(phase='prepared',prefix='../outside',proton_path='/p',spacemouse=True)),
+                        json.dumps(dict(phase='prepared',prefix='p',proton_path='/p',spacemouse='false'))):
+            with self.subTest(content=content):
+                (self.app/'clean-install.json').write_text(content)
+                self.assertEqual(self.manager_status()['clean_install'],{'valid':False})
+                with patch.object(manager,'fusion_running',return_value=False),patch.object(manager,'run') as run:
+                    for name in ('retry-installer','finish-install','clone','apply','launch','scale'):
+                        with self.assertRaises(ValueError):self.action(name)
+                    run.assert_not_called()
+
+    def test_resume_requires_valid_marker_and_unchanged_confirmation(self):
+        with patch.object(manager,'fusion_running',return_value=False),patch.object(manager,'run') as run:
+            for phase in ('prepared','prefix-ready','installer-running','installer-complete'):
+                with self.subTest(phase=phase):
+                    marker=self.marker(phase)
+                    expected=json.dumps(dict(marker,valid=True))
+                    self.action('retry-installer',expected_clean=expected,prefix='wrong',proton='/wrong',installer='/wrong.exe',spacemouse=False)
+                    self.assertEqual([str(x) for x in run.call_args.args[0]],['bash',str(REPO/'install.sh'),'--resume-clean',str(self.app),'--retry-installer','--expected-clean-state',expected])
+                    run.reset_mock()
+                    if phase in ('installer-running','installer-complete'):
+                        self.action('finish-install',expected_clean=expected)
+                        self.assertEqual([str(x) for x in run.call_args.args[0]],['bash',str(REPO/'install.sh'),'--resume-clean',str(self.app),'--finish-install','--expected-clean-state',expected])
+                        run.reset_mock()
+                    else:
+                        with self.assertRaisesRegex(ValueError,'not been started'):self.action('finish-install',expected_clean=expected)
+                    self.marker(phase,installer='/changed/installer.exe')
+                    with self.assertRaisesRegex(ValueError,'Refresh'):self.action('retry-installer',expected_clean=expected)
+                    run.assert_not_called()
+            self.marker('complete')
+            with self.assertRaisesRegex(ValueError,'No valid unfinished'):self.action('retry-installer')
+            (self.app/'clean-install.json').unlink()
+            with self.assertRaisesRegex(ValueError,'No valid unfinished'):self.action('finish-install')
+            run.assert_not_called()
+
+    def test_incomplete_installation_blocks_other_mutations_and_running_fusion(self):
+        state=self.marker();expected=json.dumps(dict(state,valid=True))
+        with patch.object(manager,'fusion_running',return_value=False),patch.object(manager,'run') as run,patch.object(manager.subprocess,'Popen') as popen:
+            for name in ('clone','install','patch','apply','update','launch','profile','scale','settings','camera','enable','disable','driver-start','driver-stop'):
+                with self.subTest(name=name),self.assertRaisesRegex(ValueError,'unfinished'):self.action(name)
+            run.assert_not_called();popen.assert_not_called()
+        with patch.object(manager,'fusion_running',return_value=True),patch.object(manager,'run') as run:
+            for name in ('retry-installer','finish-install'):
+                with self.assertRaisesRegex(ValueError,'Close Fusion'):self.action(name,expected_clean=expected)
+            run.assert_not_called()
+        self.assertEqual(json.loads((self.app/'clean-install.json').read_text()),state)
+
+    @unittest.skipUnless((REPO/'.build/manager/fusion-manager').exists(),'Build manager first')
+    def test_qt_smoke_reads_interrupted_install_without_modifying_it(self):
+        state=self.marker();before=(self.app/'clean-install.json').read_bytes()
+        env=dict(os.environ,HOME=str(self.root),XDG_CONFIG_HOME=str(self.root/'config'),
+                 XDG_DATA_HOME=str(self.root/'data'),XDG_RUNTIME_DIR=str(self.root),QT_QPA_PLATFORM='offscreen')
+        result=subprocess.run([str(REPO/'.build/manager/fusion-manager'),'--backend',str(REPO/'scripts/manager_backend.py'),
+                               '--target',str(self.app),'--repo',str(REPO),'--page','setup','--lang','de','--smoke-test'],
+                              env=env,capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.app/'clean-install.json').read_bytes(),before)
+        self.assertEqual(list(self.app.iterdir()),[self.app/'clean-install.json'])
+        self.assertEqual(json.loads(before),state)
+
+    @unittest.skipUnless((REPO/'.build/manager/resources.cpp').exists(),'Build manager first')
+    def test_qt_resume_state_and_confirmation_are_explicit(self):
+        # Exercise the actual widgets with an isolated status backend and no real action.
+        source=self.root/'manager_ui_test.cpp';binary=self.root/'manager-ui-test'
+        source.write_text('''#include <QThread>
+#define main fusion_manager_application_main
+#include "''' + str(REPO/'manager/main.cpp') + '''"
+#undef main
+int main(int argc, char **argv) {
+    QApplication app(argc, argv);
+    app.setApplicationName("Fusion Manager");
+    app.setOrganizationName("fusion-linux-dx11-test");
+    I18n::setLanguage("de");
+    Manager window(argv[1], argv[2], argv[3], "", false);
+    window.selectPage(2);
+    window.show();
+    auto *headline = window.findChild<QLabel *>("installation-headline");
+    auto *info = window.findChild<QLabel *>("installation-resume-info");
+    auto *retry = window.findChild<QPushButton *>("action-retry-installer");
+    auto *finish = window.findChild<QPushButton *>("action-finish-install");
+    auto *proton = window.findChild<QComboBox *>("proton");
+    if (!headline || !info || !retry || !finish || !proton) {
+        qWarning() << "Missing widgets" << headline << info << retry << finish;
+        return 6;
+    }
+    QElapsedTimer wait; wait.start();
+    while (headline->text() == I18n::tr("Checking…") && wait.elapsed() < 8000) {
+        app.processEvents(); QThread::msleep(10);
+    }
+    const QString phase = argv[4];
+    const bool pending = phase != "complete" && phase != "legacy";
+    if (headline->text() != I18n::tr(pending ? "Installation incomplete" : "●  Ready")) return 1;
+    if (retry->isEnabled() != (pending && phase != "invalid")) return 2;
+    if (finish->isEnabled() != (phase == "installer-running")) return 3;
+    if (pending && phase != "invalid" && !info->text().contains("saved-prefix")) return 4;
+    if (pending && phase != "invalid" && proton->currentData().toString() != "/saved/Proton") return 7;
+    if (phase == "installer-running") {
+        bool confirmed = false;
+        QTimer::singleShot(0, [&] {
+            auto *dialog = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+            if (dialog && dialog->defaultButton() && dialog->defaultButton()->text() == I18n::tr("Cancel") &&
+                dialog->informativeText().contains("saved-prefix") && dialog->text().contains("erneut"))
+                confirmed = true;
+            if (dialog) dialog->reject();
+        });
+        retry->click();
+        if (!confirmed) return 5;
+    }
+    return 0;
+}
+''')
+        flags=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','Qt6Widgets'],text=True))
+        subprocess.run(['c++','-O0','-std=c++17','-fPIC',str(source),str(REPO/'.build/manager/resources.cpp'),'-o',str(binary),*flags],check=True,capture_output=True,timeout=120)
+        fake=self.root/'fake_backend.py';snapshot=self.root/'status.json';calls=self.root/'actions'
+        fake.write_text('import pathlib,sys\nroot=pathlib.Path(__file__).parent\nif "--action" in sys.argv: (root/"actions").touch()\nprint((root/"status.json").read_text())\n')
+        env=dict(os.environ,HOME=str(self.root),XDG_CONFIG_HOME=str(self.root/'config'),
+                 XDG_RUNTIME_DIR=str(self.root),QT_QPA_PLATFORM='offscreen')
+        for phase in ('prepared','installer-running','complete','invalid','legacy'):
+            with self.subTest(phase=phase):
+                clean=None if phase=='legacy' else {'valid':False} if phase=='invalid' else dict(
+                    valid=True,phase=phase,prefix='saved-prefix',proton_path='/saved/Proton',spacemouse=True,installer='/saved/installer.exe')
+                snapshot.write_text(json.dumps(dict(app=str(self.app),clean_install=clean,fusion='/fake/Fusion360.exe',
+                                                     running=False,repo=dict(valid=True,path=str(REPO)),
+                                                     device_config=manager.DEFAULTS)))
+                result=subprocess.run([str(binary),str(fake),str(self.app),str(REPO),phase],env=env,capture_output=True,text=True,timeout=20)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertFalse(calls.exists())
+        self.assertEqual(list(self.app.iterdir()),[])
 
     def test_detached_checkout_is_still_a_real_checkout(self):
         checkout=self.root/'repo';subprocess.run(['git','init','-b','main',str(checkout)],check=True,capture_output=True)

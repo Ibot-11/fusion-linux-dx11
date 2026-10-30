@@ -1,4 +1,5 @@
 import contextlib
+import fcntl
 import importlib.util
 import io
 import json
@@ -68,6 +69,46 @@ class GitUpdateTests(unittest.TestCase):
             self.assertEqual(update.main(), 0)
         self.assertEqual((app / 'installer-ran').read_text(), 'second')
         self.assertEqual(git(self.checkout, 'rev-parse', 'HEAD'), git(self.publisher, 'rev-parse', 'HEAD'))
+
+    def test_incomplete_or_invalid_installation_blocks_update_before_git_changes(self):
+        app = self.root / 'pending'
+        app.mkdir()
+        (app / '.install.lock').touch()
+        marker = app / 'clean-install.json'
+        argv = ['update.py', '--target', str(app)]
+        for content in ('invalid', '{}', json.dumps(dict(phase='installer-running', prefix='prefix',
+                                                        proton_path='/proton', spacemouse=False))):
+            with self.subTest(content=content):
+                marker.write_text(content)
+                with patch.object(sys, 'argv', argv), patch.object(update, 'fusion_running', return_value=False), \
+                     patch.object(update, 'checkout_for_installation') as checkout, \
+                     patch.object(update, 'pull_checkout') as pull, contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(update.main(), 1)
+                checkout.assert_not_called()
+                pull.assert_not_called()
+
+    def test_completed_installation_holds_lock_during_checkout_update(self):
+        app = self.root / 'completed'
+        app.mkdir()
+        (app / '.install.lock').touch()
+        (app / 'clean-install.json').write_text(json.dumps(dict(phase='complete', prefix='prefix',
+                                                                 proton_path='/proton', spacemouse=False)))
+        with update.update_guard(app):
+            with (app / '.install.lock').open('r') as competing:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(competing, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def test_update_rejects_a_symlinked_installation_lock(self):
+        app = self.root / 'completed'
+        app.mkdir()
+        other = self.root / 'other-lock'
+        other.touch()
+        (app / '.install.lock').symlink_to(other)
+        (app / 'clean-install.json').write_text(json.dumps(dict(phase='complete', prefix='prefix',
+                                                                 proton_path='/proton', spacemouse=False)))
+        with self.assertRaisesRegex(ValueError, 'lock is invalid'):
+            with update.update_guard(app):
+                self.fail('A symlinked lock must not permit an update')
 
     def test_dirty_checkout_is_preserved(self):
         (self.checkout / 'version').write_text('my local changes')
@@ -223,10 +264,20 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[-1].args[0], ['systemctl', '--user', 'daemon-reload'])
 
     def test_legacy_space_migration_preserves_user_camera_and_buttons(self):
+        repo = self.root / 'fixture-repo'
+        repo.mkdir()
+        for name in ('scripts', 'spacemouse', 'bin', 'layer', 'config', 'vendor'):
+            (repo / name).symlink_to(REPO / name, target_is_directory=True)
+        (repo / '.build').mkdir()
+        (repo / '.build/manager').symlink_to(REPO / '.build/manager', target_is_directory=True)
+        dll = repo / '.build/spacemouse/runtime/bin/siappdll.dll'
+        dll.parent.mkdir(parents=True)
+        dll.write_bytes(b'isolated SpaceMouse DLL fixture')
+
         dest = self.app / 'spacemouse'
         dest.mkdir()
-        (dest / 'settings.conf').write_text('dead-zone = 0\n')
-        (dest / 'buttons.json').write_text('{"left":"ESC","right":"I"}')
+        (dest / 'settings.conf').write_text('dead-zone = 7\n')
+        (dest / 'buttons.json').write_text('{"left":"F","right":"HOME"}')
         (dest / 'button_mapper.py').write_text('old mapper')
         (dest / 'spacenavd').write_text('old daemon')
         (dest / 'lib').mkdir()
@@ -234,11 +285,16 @@ class RuntimeDeploymentTests(unittest.TestCase):
         (dest / 'my-notes.txt').write_text('preserve')
         camera = b'{"pan":1,"zoom":1,"rotation":1,"runtime_scale":0.6,"percent":15}\n'
         (dest / 'camera-gain.json').write_bytes(camera)
-        self.deploy(update=True, spacemouse=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            backup = setup_runtime.deploy(repo, self.app, 'custom-prefix', update=True,
+                                          spacemouse=True, desktop=False, service=False)
         config = json.loads((dest / 'device.json').read_text())
-        self.assertEqual(config['deadzone'], 0)
-        self.assertEqual(config['buttons'], ['ESC','I'])
+        self.assertEqual(config['deadzone'], 7)
+        self.assertEqual(config['buttons'], ['F', 'HOME'])
         self.assertEqual((dest / 'camera-gain.json').read_bytes(), camera)
+        self.assertEqual((dest / 'siappdll.dll').read_bytes(), dll.read_bytes())
+        self.assertEqual((backup / 'spacemouse/buttons.json').read_text(), '{"left":"F","right":"HOME"}')
+        self.assertEqual((backup / 'spacemouse/settings.conf').read_text(), 'dead-zone = 7\n')
         self.assertFalse((dest / 'spacenavd').exists())
         self.assertTrue((self.app / 'fusion-manager').is_file())
         self.assertTrue((dest / 'hidraw_input.py').is_file())
@@ -301,7 +357,7 @@ class PortabilityTests(unittest.TestCase):
         path.chmod(0o755)
 
     def test_installer_uses_the_current_autodesk_downloader(self):
-        installer = (REPO / 'install.sh').read_text()
+        installer = (REPO / 'scripts/setup_runtime.py').read_text()
         self.assertIn('Fusion%20Client%20Downloader.exe', installer)
         self.assertIn('FusionClientDownloader.exe', installer)
         self.assertNotIn('Fusion360installer.exe', installer)
@@ -314,6 +370,71 @@ class PortabilityTests(unittest.TestCase):
                                 env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), ['run', 'Fusion 360.exe'])
+
+    def test_run_proton_respects_winedebug_in_all_launch_modes(self):
+        custom = self.root / 'Custom Proton'
+        capture = self.root / 'calls.jsonl'
+        recorder = ('#!/usr/bin/env python3\n'
+                    'import json, os, sys\n'
+                    'with open(os.environ["CAPTURE"], "a") as out:\n'
+                    '    out.write(json.dumps({"args": sys.argv[1:], "env": dict(os.environ)}) + "\\n")\n')
+        self.executable(custom / 'proton', recorder)
+        self.executable(custom / 'files/bin/wine', recorder)
+        commands = self.root / 'commands'
+        self.executable(commands / 'pgrep', '#!/bin/sh\nexit 0\n')
+        (self.app / 'spacemouse-enabled').touch()
+        (self.app / 'VkLayer_fusion_present_sync.json').touch()
+        base_env = dict(self.env, PATH=str(commands) + ':' + self.env['PATH'],
+                        FUSION_PROTON_PATH=str(custom), FUSION_PREFIX_DIR='test-prefix',
+                        CAPTURE=str(capture), VK_LAYER_PATH='/existing/layers',
+                        VK_INSTANCE_LAYERS='EXISTING_LAYER')
+        base_env.pop('WINEDEBUG', None)
+        modes = [('normal', ['Fusion 360.exe', 'file.f3d'], ['run', 'Fusion 360.exe', 'file.f3d']),
+                 ('dpi', ['--set-dpi', '144'], None),
+                 ('panel', ['--panel-fix', 'extra'], [str(self.app / 'panel-fix.exe'), 'extra'])]
+        cases = [('unset', None, None, '-all'), ('diagnostic', '+timestamp,+seh', None, '+timestamp,+seh'),
+                 ('empty', '', None, ''), ('gpu.conf', '+seh', '+relay', '+relay')]
+        for case, inherited, configured, expected in cases:
+            env = dict(base_env)
+            if inherited is not None:
+                env['WINEDEBUG'] = inherited
+            gpu = self.app / 'gpu.conf'
+            gpu.write_text('export DRI_PRIME=1\n' +
+                           (f'export WINEDEBUG={configured}\n' if configured is not None else ''))
+            for mode, arguments, expected_args in modes:
+                with self.subTest(case=case, mode=mode):
+                    capture.unlink(missing_ok=True)
+                    result = subprocess.run(['bash', str(REPO / 'scripts/run-proton.sh'), *arguments],
+                                            env=env, capture_output=True, text=True, timeout=5)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    calls = [json.loads(line) for line in capture.read_text().splitlines()]
+                    self.assertEqual(len(calls), 2 if mode == 'dpi' else 1)
+                    if expected_args is not None:
+                        self.assertEqual(calls[0]['args'], expected_args)
+                    else:
+                        self.assertEqual([call['args'][2] for call in calls],
+                                         ['HKEY_CURRENT_USER\\Control Panel\\Desktop',
+                                          'HKEY_CURRENT_USER\\Software\\Wine\\Fonts'])
+                        self.assertTrue(all(call['args'][-2:] == ['144', '/f'] for call in calls))
+                    for call in calls:
+                        actual = call['env']
+                        self.assertEqual(actual['WINEDEBUG'], expected)
+                        self.assertEqual(actual['STEAM_COMPAT_DATA_PATH'], str(self.app / 'test-prefix'))
+                        self.assertEqual(actual['PROTON_USE_WINED3D'], '0')
+                        self.assertEqual(actual['PROTON_USE_XALIA'], '0')
+                        self.assertEqual(actual['NO_AT_BRIDGE'], '1')
+                        self.assertEqual(actual['WINEDLLOVERRIDES'],
+                                         'bcp47langs=;icuuc,icuin,icudt,d3dcompiler_47=n,b;siappdll=n,b')
+                        self.assertEqual(actual['VK_LAYER_PATH'], str(self.app) + ':/existing/layers')
+                        self.assertEqual(actual['VK_INSTANCE_LAYERS'], 'VK_LAYER_FUSION_present_sync:EXISTING_LAYER')
+                        self.assertEqual(actual['DXVK_CONFIG_FILE'], str(self.app / 'dxvk.conf'))
+                        self.assertEqual(actual['DXVK_LOG_PATH'], str(self.app / 'logs'))
+                        self.assertEqual(actual['DXVK_LOG_LEVEL'], 'info')
+                        self.assertEqual(actual['DRI_PRIME'], '1')
+                        if mode != 'normal':
+                            self.assertEqual(actual['WINEPREFIX'], str(self.app / 'test-prefix/pfx'))
+                            for name in ('WINENTSYNC', 'WINEESYNC', 'WINEFSYNC'):
+                                self.assertEqual(actual[name], '1')
 
     def test_switch_mode_resolves_profiles_and_removes_stale_custom_path(self):
         commands = self.root / 'commands'

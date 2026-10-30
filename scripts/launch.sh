@@ -4,6 +4,58 @@ set -euo pipefail
 APP_DIR="${FUSION_APP_DIR:-$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")}"
 PREFIX_DIR="${FUSION_PREFIX_DIR:-compatdata-exp-dx11}"
 
+launch_error() {
+  local message="$1"
+  printf 'Error: %s\n' "$message" >&2
+  if command -v kdialog >/dev/null 2>&1; then
+    kdialog --error "$message" || true
+  elif command -v zenity >/dev/null 2>&1; then
+    zenity --error --text="$message" || true
+  fi
+}
+
+marker="$APP_DIR/clean-install.json"
+if [[ -e "$marker" || -L "$marker" ]]; then
+  # The installer uses this same lock; do not create it when the state is unknown.
+  lock="$APP_DIR/.install.lock"
+  if [[ ! -f "$lock" || -L "$lock" ]] || ! exec {install_lock}<"$lock" ||
+     ! flock -s -n "$install_lock" || [[ ! "$lock" -ef "/proc/$$/fd/$install_lock" ]]; then
+    launch_error 'The installation is in progress or its installation lock is unavailable. Close the installer and check the installation in Fusion Manager before starting Fusion.'
+    exit 1
+  fi
+  if [[ ! -f "$marker" ]]; then
+    launch_error 'The installation state is invalid or unreadable. Check clean-install.json before starting Fusion; no files were changed.'
+    exit 1
+  fi
+  if python3 -I -B - "$APP_DIR" <<'PY'
+import sys
+from pathlib import Path
+
+try:
+    app = Path(sys.argv[1])
+    sys.path.insert(0, str(app))
+    from manager_backend import clean_install
+    state = clean_install(app)
+    if not state or not state.get('valid'):
+        sys.exit(2)
+    if state['phase'] != 'complete':
+        sys.exit(3)
+except Exception:
+    sys.exit(2)
+PY
+  then
+    :
+  else
+    result=$?
+    if [[ "$result" -eq 3 ]]; then
+      launch_error 'The Fusion installation is incomplete. Open Fusion Manager, choose Setup, and explicitly retry the Autodesk installer or confirm its completed installation. No files were changed.'
+    else
+      launch_error 'The installation state could not be verified. Check clean-install.json and the installed manager files before starting Fusion; no files were changed.'
+    fi
+    exit 1
+  fi
+fi
+
 if [[ -f "$APP_DIR/prefix-dir" ]]; then PREFIX_DIR="$(cat "$APP_DIR/prefix-dir")"; fi
 production="$APP_DIR/$PREFIX_DIR/pfx/drive_c"
 

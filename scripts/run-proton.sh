@@ -51,7 +51,7 @@ if [[ -f "$APP_DIR/gpu.conf" ]]; then
 fi
 
 export BROWSER="$APP_DIR/browser-request.py"
-export WINEDEBUG=-all
+export WINEDEBUG="${WINEDEBUG--all}"
 
 mkdir -p "$STEAM_COMPAT_DATA_PATH" "$DXVK_LOG_PATH"
 

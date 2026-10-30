@@ -99,6 +99,20 @@ Ein bereits heruntergeladener Autodesk-Installer lässt sich direkt verwenden:
 ./install.sh --clean --installer "/pfad/zu/FusionClientDownloader.exe"
 ```
 
+Wurde die Installation unterbrochen, Fusion schließen und die Wiederaufnahme unter **Einrichtung** im Manager verwenden. Um das Autodesk-Installationsprogramm im Terminal ausdrücklich erneut zu starten:
+
+```bash
+./install.sh --resume-clean "/pfad/zu/autodesk-fusion" --retry-installer
+```
+
+Wenn das Autodesk-Setup bereits abgeschlossen wurde, Fusion schließen und stattdessen die ausstehende Linux-Integration ausdrücklich fertigstellen:
+
+```bash
+./install.sh --resume-clean "/pfad/zu/autodesk-fusion" --finish-install
+```
+
+Keine der beiden Optionen löscht das vorhandene Prefix. Eine abgeschlossene Integration bestätigt für sich genommen weder den Fusion-Start noch die Anmeldung.
+
 ### 4. Fusion starten
 
 Den Anwendungsmenü-Eintrag **Autodesk Fusion** verwenden, im Manager **Fusion starten** wählen oder ausführen:
@@ -108,6 +122,8 @@ autodesk-fusion
 ```
 
 Für die Autodesk-Anmeldung werden HTTP-/HTTPS-Links über `xdg-open` mit dem Standardbrowser des Desktops geöffnet.
+
+Wine-Diagnosemeldungen sind standardmäßig deaktiviert. Für einen Terminalstart lassen sich einzelne Kanäle aktivieren, zum Beispiel mit `WINEDEBUG=+timestamp,+seh autodesk-fusion`; die Ausgabe steht im Installationsordner unter `logs/fusion.log`. Diagnoseprotokolle können vertrauliche Informationen enthalten.
 
 ## Verwendung
 

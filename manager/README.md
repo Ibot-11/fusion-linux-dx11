@@ -29,6 +29,8 @@ A different installation can be selected in **Setup → Change folders** or on t
 
 A new installation downloads Autodesk's official installer unless an existing installer executable is selected. **Adopt existing** configures an existing Fusion installation; **Apply checkout** deploys local changes without fetching Git updates.
 
+If a new installation was interrupted, close Fusion before choosing whether to retry Autodesk's installer or finish an already completed Autodesk installation. The recovery actions preserve the existing prefix; a completed integration alone does not verify Fusion startup or sign-in.
+
 **Check** explicitly fetches the configured remote. **Update** accepts only a fast-forward and refuses local changes or divergent history. The footer explains when no update was started or when the checkout is already current. The updater never resets, stashes or switches branches.
 
 Replaced runtime files are backed up under `backups/updates`. Prefixes, documents and Proton, GPU, DXVK and SpaceMouse preferences are preserved. Fusion itself continues to use Autodesk's updater.

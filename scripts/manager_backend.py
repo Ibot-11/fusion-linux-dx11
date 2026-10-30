@@ -59,6 +59,33 @@ def valid_prefix(value):
     return value
 
 
+def clean_install(app):
+    marker = app / 'clean-install.json'
+    try:
+        marker.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return {'valid': False}
+    try:
+        value = json.loads(marker.read_text())
+        if not isinstance(value, dict) or value.get('phase') not in (
+                'prepared', 'prefix-ready', 'installer-running', 'installer-complete', 'complete'):
+            raise ValueError('Invalid phase')
+        if not isinstance(value.get('prefix'), str):
+            raise ValueError('Invalid prefix')
+        valid_prefix(value['prefix'])
+        if not isinstance(value.get('proton_path'), str) or not value['proton_path']:
+            raise ValueError('Invalid Proton path')
+        if type(value.get('spacemouse')) is not bool:
+            raise ValueError('Invalid SpaceMouse setting')
+        if value.get('installer') is not None and not isinstance(value['installer'], str):
+            raise ValueError('Invalid installer path')
+        return {**value, 'valid': True}
+    except (OSError, ValueError, TypeError):
+        return {'valid': False}
+
+
 def git(repo, *args):
     return subprocess.check_output(['git', '-C', str(repo), *args], text=True, stderr=subprocess.PIPE).strip()
 
@@ -140,7 +167,11 @@ def setup_device_access():
 
 
 def status(app, repo):
-    prefix = read(app / 'prefix-dir', 'compatdata-exp-dx11')
+    clean = clean_install(app)
+    pending = clean is not None and (not clean['valid'] or clean['phase'] != 'complete')
+    prefix = clean['prefix'] if pending and clean['valid'] else read(app / 'prefix-dir', 'compatdata-exp-dx11')
+    proton_path = clean['proton_path'] if pending and clean['valid'] else read(app / 'proton-path')
+    proton_name = Path(proton_path).name if pending and clean['valid'] else read(app / 'proton-version', 'Proton - Experimental')
     try:
         prefix = valid_prefix(prefix)
         prefix_path = app / prefix
@@ -185,12 +216,12 @@ def status(app, repo):
     except ValueError:
         scale_target_dpi = None
     return {'app': str(app), 'exists': app.is_dir(), 'integration_exists': (app / 'launch.sh').is_file(), 'prefix': prefix, 'prefixes': prefixes,
+            'clean_install': clean,
             'prefix_exists': bool(prefix_path and (prefix_path / 'pfx').is_dir()),
             'scale_mode': scale_mode, 'scale_dpi': scale_dpi, 'scale_percent': scale_percent,
             'scale_target_dpi': scale_target_dpi,
             'scale_target_percent': fusion_scale.nearest_percent(scale_target_dpi) if scale_target_dpi else None,
-            'proton': read(app / 'proton-version', 'Proton - Experimental'),
-            'proton_path': read(app / 'proton-path'), 'protons': protons, 'steam': steam,
+            'proton': proton_name, 'proton_path': proton_path, 'protons': protons, 'steam': steam,
             'fusion': str(fusion) if fusion else None, 'fusion_version': fusion_version(fusion),
             'running': fusion_running(), 'installed': read_json(app / 'repo-state.json'),
             'repo': repository(repo), 'spacemouse_enabled': (app / 'spacemouse-enabled').exists(),
@@ -211,6 +242,28 @@ def closed():
 
 def action(args, app, repo):
     name = args.action
+    clean = clean_install(app)
+    pending = clean is not None and (not clean['valid'] or clean['phase'] != 'complete')
+    if pending and name in ('clone', 'install', 'patch', 'apply', 'update', 'launch', 'profile', 'scale',
+                            'settings', 'camera', 'enable', 'disable', 'driver-start', 'driver-stop'):
+        raise ValueError('The clean installation is unfinished. Resume it before changing the installation.')
+    if name in ('retry-installer', 'finish-install'):
+        closed()
+        if not clean or not clean['valid'] or clean['phase'] == 'complete':
+            raise ValueError('No valid unfinished clean installation was found.')
+        if name == 'finish-install' and clean['phase'] not in ('installer-running', 'installer-complete'):
+            raise ValueError('The Autodesk installer has not been started yet.')
+        try:
+            expected = json.loads(args.expected_clean or '')
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError('Refresh the installation status before continuing.')
+        if expected != clean:
+            raise ValueError('Refresh the installation status before continuing.')
+        if not repo or not (repo / 'install.sh').is_file():
+            raise ValueError('Select the local fusion-linux-dx11 checkout.')
+        run(['bash', repo / 'install.sh', '--resume-clean', app, '--' + name,
+             '--expected-clean-state', args.expected_clean])
+        return
     if name == 'setup-access':
         setup_device_access()
     elif name == 'clone':
@@ -331,6 +384,7 @@ def main():
     parser.add_argument('--prefix')
     parser.add_argument('--proton')
     parser.add_argument('--installer')
+    parser.add_argument('--expected-clean')
     parser.add_argument('--spacemouse', action='store_true')
     parser.add_argument('--settings')
     parser.add_argument('--percent', type=int)

@@ -129,6 +129,8 @@ class Manager : public QMainWindow {
            *deviceSummary = label("", "summary"), *buttonState = label("", "muted");
     QLabel *inputAccessInfo = label("", "warning"), *inputStateInfo = label("", "muted");
     QWidget *accessPanel = new QWidget;
+    QWidget *resumePanel = new QWidget;
+    QLabel *resumeInfo = label("", "warning");
     QPushButton *cloneButton = nullptr;
     QLabel *result = label(I18n::tr("Ready"), "muted"), *cameraHint = label(I18n::tr("Saved for next launch"), "muted"),
            *scaleHint = label(I18n::tr("Not applied"), "muted");
@@ -288,6 +290,36 @@ class Manager : public QMainWindow {
             requestStatus();
             return;
         }
+        if (action == "retry-installer" || action == "finish-install") {
+            const auto clean = last["clean_install"].toObject();
+            const QString selected = QFileInfo(target->text()).canonicalFilePath();
+            if (selected.isEmpty() || selected != QFileInfo(last["app"].toString()).canonicalFilePath() ||
+                !clean["valid"].toBool() || clean["phase"].toString() == "complete") {
+                result->setText(I18n::tr("Refresh the installation status before continuing."));
+                requestStatus();
+                return;
+            }
+            QMessageBox confirmation(this);
+            confirmation.setWindowTitle(I18n::tr(action == "retry-installer" ? "Retry Autodesk installer" :
+                                                                               "Confirm installation completed"));
+            confirmation.setIcon(QMessageBox::Warning);
+            confirmation.setText(I18n::tr(action == "retry-installer"
+                ? "This will start the Autodesk installer again. Only continue after any previous installer has closed."
+                : "Confirm that the Autodesk installer has finished installing Fusion and has closed. This runs the remaining Linux setup, not the Autodesk installer."));
+            confirmation.setInformativeText(I18n::tr("Installation: %1\nPrefix: %2\nProton: %3\nSpaceMouse: %4")
+                .arg(selected, text(clean, "prefix"), text(clean, "proton_path"),
+                     I18n::tr(clean["spacemouse"].toBool() ? "Enabled" : "Disabled")) +
+                (action == "retry-installer" ? "\n" + I18n::tr("Installer: %1").arg(
+                    text(clean, "installer", I18n::tr("Automatic download"))) : QString()));
+            auto *proceed = confirmation.addButton(I18n::tr(action == "retry-installer" ? "Retry installer" :
+                                                                                           "Finish setup"), QMessageBox::AcceptRole);
+            auto *cancel = confirmation.addButton(I18n::tr("Cancel"), QMessageBox::RejectRole);
+            confirmation.setDefaultButton(qobject_cast<QPushButton *>(cancel));
+            confirmation.exec();
+            if (confirmation.clickedButton() != proceed)
+                return;
+            extra << "--expected-clean" << QString::fromUtf8(QJsonDocument(clean).toJson(QJsonDocument::Compact));
+        }
         if (action == "settings") {
             QJsonArray axes, inversions, binds;
             for (int i = 0; i < 6; ++i) {
@@ -344,17 +376,39 @@ class Manager : public QMainWindow {
         updateAvailability();
         updateCameraStatus(s["camera_live"].toObject());
         const auto r = s["repo"].toObject(), installed = s["installed"].toObject();
+        const auto clean = s["clean_install"].toObject();
+        const bool hasClean = s["clean_install"].isObject();
+        const bool pending = hasClean && (!clean["valid"].toBool() || clean["phase"].toString() != "complete");
+        const QString phase = clean["phase"].toString();
+        const QString phaseText = phase == "prepared" ? I18n::tr("Prepared") :
+                                  phase == "prefix-ready" ? I18n::tr("Prefix prepared") :
+                                  phase == "installer-running" ? I18n::tr("Installer started") :
+                                  phase == "installer-complete" ? I18n::tr("Installer completed") :
+                                  phase == "complete" ? I18n::tr("Setup completed") :
+                                                        I18n::tr("Invalid installation marker");
+        resumePanel->setVisible(hasClean);
+        resumeInfo->setText(clean["valid"].toBool()
+            ? I18n::tr("Installation state: %1\nPrefix: %2\nProton: %3\nSpaceMouse: %4")
+                  .arg(phaseText, text(clean, "prefix"), text(clean, "proton_path"),
+                       I18n::tr(clean["spacemouse"].toBool() ? "Enabled" : "Disabled"))
+            : I18n::tr("Invalid installation marker. No changes can be made until it is inspected."));
         const bool present = s["fusion"].isString(), running = s["running"].toBool();
-        headline->setText(running ? I18n::tr("●  Running")
+        headline->setText(pending ? I18n::tr("Installation incomplete") : running ? I18n::tr("●  Running")
                                   : present ? I18n::tr("●  Ready") : I18n::tr("Not installed"));
-        headline->setProperty("tone", running || present ? "good" : "neutral");
+        headline->setProperty("tone", !pending && (running || present) ? "good" : "neutral");
         headline->style()->unpolish(headline);
         headline->style()->polish(headline);
-        subtitle->setText(present ? I18n::tr("Version %1").arg(text(s, "fusion_version"))
+        subtitle->setText(pending ? I18n::tr("Installation state: %1 · See Setup").arg(phaseText) :
+                          present ? I18n::tr("Version %1").arg(text(s, "fusion_version"))
                                   : I18n::tr("Choose an installation in Setup"));
+        if (pending && (result->text() == I18n::tr("Ready") || result->text() == I18n::tr("Completed")))
+            result->setText(I18n::tr("Installation incomplete"));
+        else if (!pending && result->text() == I18n::tr("Installation incomplete"))
+            result->setText(I18n::tr("Ready"));
         overviewPrefix->setText(text(s, "prefix"));
         overviewProton->setText(text(s, "proton"));
         integrationState->setText(
+            pending ? I18n::tr("Installation incomplete") :
             s["integration_exists"].toBool() ? I18n::tr("Installed") : I18n::tr("Not configured"));
         fusionInfo->setText(I18n::tr("Fusion: %1\nRevision: %2\nPrefix: %3\nProton: %4\nExecutable: %5")
                                 .arg(text(s, "fusion_version", I18n::tr("Not installed")),
@@ -510,7 +564,8 @@ class Manager : public QMainWindow {
                     text(entryObject, "name") == text(s, "proton", ""))
                     proton->setCurrentIndex(proton->count() - 1);
             }
-            withSpace->setChecked(s["spacemouse_installed"].toBool() || !present);
+            withSpace->setChecked(pending && clean["valid"].toBool() ? clean["spacemouse"].toBool()
+                                                                   : s["spacemouse_installed"].toBool() || !present);
             const int scaleIndex = fusionScale->findData(text(s, "scale_mode", "auto"));
             if (scaleIndex >= 0)
                 fusionScale->setCurrentIndex(scaleIndex);
@@ -525,6 +580,19 @@ class Manager : public QMainWindow {
             camera->setValue(s["camera"].toObject()["percent"].toInt(25));
             loaded = true;
         }
+        if (pending && clean["valid"].toBool()) {
+            prefix->setCurrentText(text(clean, "prefix"));
+            const QString savedProton = text(clean, "proton_path", "");
+            int index = proton->findData(savedProton);
+            if (index < 0 && !savedProton.isEmpty()) {
+                proton->addItem(QFileInfo(savedProton).fileName(), savedProton);
+                index = proton->count() - 1;
+                proton->setItemData(index, savedProton, Qt::ToolTipRole);
+            }
+            if (index >= 0)
+                proton->setCurrentIndex(index);
+            withSpace->setChecked(clean["spacemouse"].toBool());
+        }
         if (!s["error"].isNull() && !text(s, "error", "").isEmpty())
             result->setText(I18n::tr(text(s, "error")));
         if (smoke || !screenshot.isEmpty()) {
@@ -538,18 +606,34 @@ class Manager : public QMainWindow {
     void updateAvailability() {
         const bool running = last["running"].toBool();
         const auto r = last["repo"].toObject();
+        const auto clean = last["clean_install"].toObject();
+        const bool pending = last["clean_install"].isObject() &&
+                             (!clean["valid"].toBool() || clean["phase"].toString() != "complete");
         for (auto *widget : mutationControls) {
             QString reason;
             const QString action = widget->property("action").toString();
             if (busy)
                 reason = I18n::tr("Another action is running.");
+            else if ((action == "retry-installer" || action == "finish-install") &&
+                     (!pending || !clean["valid"].toBool()))
+                reason = I18n::tr("No valid unfinished clean installation was found.");
+            else if (action == "finish-install" && clean["phase"].toString() != "installer-running" &&
+                     clean["phase"].toString() != "installer-complete")
+                reason = I18n::tr("The Autodesk installer has not been started yet.");
+            else if (pending && (action == "clone" || action == "install" || action == "patch" || action == "apply" ||
+                                action == "update" || action == "launch" || action == "profile" ||
+                                action == "scale" || action == "settings" || action == "camera" ||
+                                action == "enable" || action == "disable" || action == "driver-start" ||
+                                action == "driver-stop"))
+                reason = I18n::tr("Finish the clean installation before changing it.");
             else if (action == "launch" && running)
                 reason = I18n::tr("Fusion is already running.");
             else if (action == "launch" && !last["fusion"].isString())
                 reason = I18n::tr("Fusion is not installed yet.");
             else if (running &&
                      (action == "update" || action == "install" || action == "patch" || action == "apply" ||
-                      action == "profile" || action == "scale" || action == "enable" || action == "disable"))
+                      action == "profile" || action == "scale" || action == "enable" || action == "disable" ||
+                      action == "retry-installer" || action == "finish-install"))
                 reason = I18n::tr("Close Fusion before making this change.");
             else if ((action == "driver-start" || action == "driver-stop" || action == "enable" ||
                       action == "disable") &&
@@ -565,7 +649,7 @@ class Manager : public QMainWindow {
             else if (action == "clone" && r["valid"].toBool())
                 reason = I18n::tr("The selected checkout already exists.");
             else if ((action == "update" || action == "check" || action == "apply" || action == "install" ||
-                      action == "patch") &&
+                      action == "patch" || action == "retry-installer" || action == "finish-install") &&
                      !r["valid"].toBool())
                 reason = I18n::tr("Select a valid checkout first.");
             else if (action == "update" && !r["upstream"].isString())
@@ -897,6 +981,16 @@ class Manager : public QMainWindow {
         mutationControls << fusionScale;
 
         auto *installation = new QVBoxLayout;
+        auto *resumeLayout = new QVBoxLayout(resumePanel);
+        resumeLayout->setContentsMargins(0, 0, 0, 0);
+        resumeLayout->addWidget(resumeInfo);
+        auto *resumeActions = new QHBoxLayout;
+        resumeActions->addWidget(actionButton(I18n::tr("Retry Autodesk installer"), "retry-installer"));
+        resumeActions->addWidget(actionButton(I18n::tr("Confirm installation completed"), "finish-install"));
+        resumeActions->addStretch();
+        resumeLayout->addLayout(resumeActions);
+        resumePanel->hide();
+        installation->addWidget(resumePanel);
         auto *installRow = new QHBoxLayout;
         installRow->addWidget(actionButton(I18n::tr("Install Fusion"), "install", {}, true));
         installRow->addWidget(actionButton(I18n::tr("Adopt existing"), "patch"));
@@ -1088,6 +1182,8 @@ class Manager : public QMainWindow {
         setWindowTitle("Fusion Manager");
         resize(1120, 800);
         setMinimumSize(880, 640);
+        headline->setObjectName("installation-headline");
+        resumeInfo->setObjectName("installation-resume-info");
         prefix->setEditable(true);
         target->setText(appPath);
         repo->setText(repoPath);

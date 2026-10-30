@@ -11,10 +11,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libvulkan-dev qt6-base-dev qt6-base-dev-tools libx11-dev g++-mingw-w64-x86-64
-      - name: Build runtime
+      - name: Build core runtime
         run: |
           make -C layer
           make -C manager
+      - name: Installer tests without SpaceMouse build
+        run: python3 -m unittest discover -s tests -v
+      - name: Build SpaceMouse runtime
+        run: |
           bash spacemouse/build.sh
           (cd spacemouse/prebuilt && sha256sum --check SHA256SUMS)
       - name: Installer and update tests

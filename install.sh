@@ -8,12 +8,17 @@ SPACE="auto"
 INSTALLER=""
 REQUESTED_PREFIX=""
 REQUESTED_PROTON=""
+RESUME_ACTION=""
+EXPECTED_CLEAN_STATE=""
 
 usage() {
   cat <<'HELP'
 Usage: ./install.sh [MODE] [INSTALLATION_FOLDER] [OPTIONS]
   --patch             Set up an existing Fusion installation
   --clean             Run the Autodesk installer and set up the Linux integration
+  --resume-clean      Continue an interrupted clean installation
+  --retry-installer   Explicitly run the Autodesk installer again when resuming
+  --finish-install    Confirm Autodesk setup completed and finish integration
   --update, -u        Update the Git branch and install the new revision
   --apply-update      Apply the current checkout without downloading updates
   --build-layer       Build the Vulkan layer only
@@ -31,7 +36,7 @@ HELP
 while (($#)); do
   case "$1" in
     --help|-h) usage; exit 0 ;;
-    --patch|--clean|--update|--apply-update|--build-layer|-u)
+    --patch|--clean|--resume-clean|--update|--apply-update|--build-layer|-u)
       [[ "$MODE" == menu ]] || { echo 'Choose only one mode.' >&2; exit 1; }
       MODE="${1#--}"; [[ "$MODE" == -u ]] && MODE=update
       ;;
@@ -40,11 +45,26 @@ while (($#)); do
     --prefix) shift; REQUESTED_PREFIX="${1:?--prefix requires a folder name}" ;;
     --proton) shift; REQUESTED_PROTON="${1:?--proton requires a folder path}" ;;
     --installer) shift; INSTALLER="${1:?--installer requires a file path}" ;;
+    --expected-clean-state) shift; EXPECTED_CLEAN_STATE="${1:?--expected-clean-state requires JSON}" ;;
+    --retry-installer|--finish-install)
+      [[ -z "$RESUME_ACTION" ]] || { echo 'Choose only one resume action.' >&2; exit 1; }
+      [[ "$1" == --retry-installer ]] && RESUME_ACTION=retry || RESUME_ACTION=finish
+      ;;
     --*) echo "Unknown option: $1" >&2; usage; exit 1 ;;
     *) TARGET_DIR="$1" ;;
   esac
   shift
 done
+
+if [[ "$MODE" == resume-clean && -z "$RESUME_ACTION" ]]; then
+  echo 'Choose --retry-installer or --finish-install explicitly.' >&2; exit 1
+fi
+if [[ "$MODE" != resume-clean && -n "$RESUME_ACTION" ]]; then
+  echo 'Resume actions require --resume-clean.' >&2; exit 1
+fi
+if [[ "$MODE" != resume-clean && -n "$EXPECTED_CLEAN_STATE" ]]; then
+  echo '--expected-clean-state requires --resume-clean.' >&2; exit 1
+fi
 
 if [[ "$MODE" == menu ]]; then
   echo "Autodesk Fusion Linux – Installer"
@@ -66,6 +86,19 @@ fi
 
 command -v python3 >/dev/null || { echo 'Install Python 3 to continue.' >&2; exit 1; }
 TARGET_DIR="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$TARGET_DIR")"
+
+if [[ "$MODE" == update || "$MODE" == apply-update || "$MODE" == patch ]]; then
+  python3 - "$SCRIPT_DIR" "$TARGET_DIR" <<'PYCODE'
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(sys.argv[1]) / 'scripts'))
+from setup_runtime import require_complete_clean
+try:
+    require_complete_clean(Path(sys.argv[2]))
+except ValueError as error:
+    raise SystemExit(str(error))
+PYCODE
+fi
 
 if [[ "$MODE" == update ]]; then
   command -v git >/dev/null || { echo 'Install Git to continue.' >&2; exit 1; }
@@ -97,8 +130,8 @@ fi
 if [[ "$MODE" == patch && ! -d "$TARGET_DIR" ]]; then
   echo "Installation not found: $TARGET_DIR; use --clean for a new installation." >&2; exit 1
 fi
-if [[ "$MODE" == clean && ( -f "$TARGET_DIR/prefix-dir" || -d "$TARGET_DIR/${REQUESTED_PREFIX:-compatdata-exp-dx11}/pfx" ) ]]; then
-  echo 'An installation already exists. Use --patch or --update.' >&2; exit 1
+if [[ "$MODE" == resume-clean && ! -d "$TARGET_DIR" ]]; then
+  echo "Installation not found: $TARGET_DIR" >&2; exit 1
 fi
 
 PREFIX="${REQUESTED_PREFIX:-compatdata-exp-dx11}"
@@ -131,12 +164,21 @@ if [[ -n "$REQUESTED_PROTON" ]]; then
 fi
 
 ENABLE_SPACE=0
-if [[ "$SPACE" == on ]]; then
+if [[ "$MODE" == resume-clean ]]; then
+  SPACE="$(python3 - "$TARGET_DIR/clean-install.json" <<'PYCODE'
+import json, sys
+with open(sys.argv[1]) as file: state = json.load(file)
+if not isinstance(state.get('spacemouse'), bool): raise SystemExit('Invalid clean installation state.')
+print('on' if state['spacemouse'] else 'off')
+PYCODE
+)"
+  [[ "$SPACE" == on ]] && ENABLE_SPACE=1
+elif [[ "$SPACE" == on ]]; then
   ENABLE_SPACE=1
 elif [[ "$SPACE" == auto ]]; then
   if [[ -f "$TARGET_DIR/spacemouse/start.py" || -f "$TARGET_DIR/spacemouse-enabled" ]]; then
     SPACE=on
-  elif [[ "$MODE" != apply-update && -t 0 ]]; then
+  elif [[ "$MODE" != apply-update && "$MODE" != resume-clean && -t 0 ]]; then
     read -rp 'Install direct SpaceMouse support? [y/N]: ' answer
     if [[ "${answer:-n}" =~ ^[JjYy] ]]; then SPACE=on; ENABLE_SPACE=1; else SPACE=off; fi
   else
@@ -155,6 +197,20 @@ if [[ "$SPACE" == on ]]; then
   bash "$SCRIPT_DIR/spacemouse/build.sh"
 fi
 
+if [[ "$MODE" == clean || "$MODE" == resume-clean ]]; then
+  clean_args=(--target "$TARGET_DIR" --prefix "$PREFIX")
+  if [[ "$MODE" == clean ]]; then
+    clean_args+=(--clean-install)
+    [[ "$SPACE" == on ]] && clean_args+=(--spacemouse)
+    [[ -n "$REQUESTED_PROTON" ]] && clean_args+=(--proton "$REQUESTED_PROTON")
+  else
+    clean_args+=(--resume-clean "$RESUME_ACTION")
+    [[ -n "$EXPECTED_CLEAN_STATE" ]] && clean_args+=(--expected-clean-state "$EXPECTED_CLEAN_STATE")
+  fi
+  [[ -n "$INSTALLER" ]] && clean_args+=(--installer "$INSTALLER")
+  exec python3 -u "$SCRIPT_DIR/scripts/setup_runtime.py" "${clean_args[@]}"
+fi
+
 setup_args=(--target "$TARGET_DIR" --prefix "$PREFIX")
 [[ "$MODE" == apply-update ]] && setup_args+=(--update)
 [[ "$SPACE" == on ]] && setup_args+=(--spacemouse)
@@ -170,20 +226,6 @@ if not (proton / 'proton').is_file(): raise SystemExit('The selected Proton fold
 (app / 'proton-version').write_text(proton.name + '\n')
 (app / 'proton-path').write_text(str(proton) + '\n')
 PYCODE
-fi
-
-if [[ "$MODE" == clean ]]; then
-  if [[ -z "$INSTALLER" ]]; then
-    command -v curl >/dev/null || { echo 'Install curl or specify --installer FILE.' >&2; exit 1; }
-    INSTALLER="$TARGET_DIR/FusionClientDownloader.exe"
-    echo 'Downloading the official Autodesk installer …'
-    curl --fail --location --retry 2 'https://dl.appstreaming.autodesk.com/production/installers/Fusion%20Client%20Downloader.exe' -o "$INSTALLER"
-  fi
-  [[ -f "$INSTALLER" ]] || { echo "Installer not found: $INSTALLER" >&2; exit 1; }
-  INSTALLER="$(realpath "$INSTALLER")"
-  echo 'Follow the Autodesk setup, then close Fusion.'
-  "$TARGET_DIR/run-proton.sh" "$INSTALLER"
-  python3 "$SCRIPT_DIR/scripts/setup_runtime.py" "${setup_args[@]}" --update
 fi
 
 echo 'Done. Manage: fusion-manager; Launch: autodesk-fusion; Update: autodesk-fusion-update'
