@@ -96,7 +96,7 @@ A custom folder can be passed to the terminal installer:
 To use an already downloaded Autodesk installer:
 
 ```bash
-./install.sh --clean --installer "/path/to/Fusion360installer.exe"
+./install.sh --clean --installer "/path/to/FusionClientDownloader.exe"
 ```
 
 ### 4. Start Fusion
@@ -113,7 +113,7 @@ For Autodesk sign-in, HTTP/HTTPS links are opened with the desktop's default bro
 
 Start **Fusion Manager** from the application menu or run `fusion-manager`.
 
-- **Overview:** start Fusion, inspect versions and update the Linux integration.
+- **Overview:** start Fusion, inspect the installation state and update the Linux integration.
 - **SpaceMouse:** configure axes, shortcuts and camera speed.
 - **Setup:** select the installation, prefix, Proton runtime and Fusion UI scaling.
 - **Activity:** inspect command output and open the log folder.

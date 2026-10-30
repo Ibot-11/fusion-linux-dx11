@@ -14,7 +14,7 @@ Choose **English** or **Deutsch** in the sidebar. Confirm the restart to apply t
 
 ## Pages
 
-- **Overview:** Fusion and integration versions, launch, repository status and updates.
+- **Overview:** Fusion version, integration state, launch, repository status and updates.
 - **SpaceMouse:** device status, axes, button shortcuts and camera speed.
 - **Setup:** installation folder, source checkout, prefix, Proton and Fusion UI scaling.
 - **Activity:** operation output and log-folder access.
@@ -51,7 +51,7 @@ See [SpaceMouse compatibility, protocols and diagnostics](../spacemouse/README.m
 
 ## Logs and diagnostics
 
-The selected installation contains `logs/manager-launch.log` and the other runtime logs. **Activity → Open log folder** opens this location. Version information comes from the selected Fusion executable and `repo-state.json`; repository information comes from Git.
+The selected installation contains `logs/manager-launch.log` and the other runtime logs. **Activity → Open log folder** opens this location. The Fusion version comes from the selected Fusion executable; repository information comes from Git.
 
 ## Build and verification
 

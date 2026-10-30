@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Autodesk Fusion Linux setup and updates. No system packages are installed.
 set -euo pipefail
-VERSION="1.2.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/autodesk-fusion"
 MODE="menu"
@@ -23,7 +22,6 @@ Usage: ./install.sh [MODE] [INSTALLATION_FOLDER] [OPTIONS]
   --prefix NAME       Prefix folder for a new installation
   --proton FOLDER     Use an installed Proton folder
   --installer FILE    Use an existing Autodesk installer EXE with --clean
-  --version, -v       Show version
   --help, -h          Show help
 With no arguments, opens the menu. Updates preserve prefix, Proton, GPU, DXVK
 and SpaceMouse settings. Close Fusion before installing or updating.
@@ -32,7 +30,6 @@ HELP
 
 while (($#)); do
   case "$1" in
-    --version|-v) echo "fusion-linux-dx11 installer version $VERSION"; exit 0 ;;
     --help|-h) usage; exit 0 ;;
     --patch|--clean|--update|--apply-update|--build-layer|-u)
       [[ "$MODE" == menu ]] || { echo 'Choose only one mode.' >&2; exit 1; }
@@ -50,7 +47,7 @@ while (($#)); do
 done
 
 if [[ "$MODE" == menu ]]; then
-  echo "Autodesk Fusion Linux – Installer v$VERSION"
+  echo "Autodesk Fusion Linux – Installer"
   echo '1) Set up an existing installation'
   echo '2) New installation'
   echo '3) Update from the Git repository'
@@ -158,7 +155,7 @@ if [[ "$SPACE" == on ]]; then
   bash "$SCRIPT_DIR/spacemouse/build.sh"
 fi
 
-setup_args=(--target "$TARGET_DIR" --prefix "$PREFIX" --version "$VERSION")
+setup_args=(--target "$TARGET_DIR" --prefix "$PREFIX")
 [[ "$MODE" == apply-update ]] && setup_args+=(--update)
 [[ "$SPACE" == on ]] && setup_args+=(--spacemouse)
 [[ "$ENABLE_SPACE" == 1 ]] && setup_args+=(--enable-spacemouse)
@@ -178,9 +175,9 @@ fi
 if [[ "$MODE" == clean ]]; then
   if [[ -z "$INSTALLER" ]]; then
     command -v curl >/dev/null || { echo 'Install curl or specify --installer FILE.' >&2; exit 1; }
-    INSTALLER="$TARGET_DIR/Fusion360installer.exe"
+    INSTALLER="$TARGET_DIR/FusionClientDownloader.exe"
     echo 'Downloading the official Autodesk installer …'
-    curl --fail --location --retry 2 'https://dl.appstreaming.autodesk.com/production/installers/Fusion360installer.exe' -o "$INSTALLER"
+    curl --fail --location --retry 2 'https://dl.appstreaming.autodesk.com/production/installers/Fusion%20Client%20Downloader.exe' -o "$INSTALLER"
   fi
   [[ -f "$INSTALLER" ]] || { echo "Installer not found: $INSTALLER" >&2; exit 1; }
   INSTALLER="$(realpath "$INSTALLER")"

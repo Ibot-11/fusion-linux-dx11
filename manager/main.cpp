@@ -121,7 +121,7 @@ class Manager : public QMainWindow {
     QCheckBox *withSpace = new QCheckBox(I18n::tr("Include SpaceMouse"));
     QLabel *headline = label(I18n::tr("Checking…"), "badge"), *subtitle = label("", "muted"),
            *fusionInfo = label("", "detail"), *repoInfo = label("", "detail");
-    QLabel *overviewPrefix = label("—"), *overviewProton = label("—"), *integrationVersion = label("—"),
+    QLabel *overviewPrefix = label("—"), *overviewProton = label("—"), *integrationState = label("—"),
            *repoSummary = label(I18n::tr("Checking…"), "summary"), *repoBranch = label("", "muted"),
            *repoCheck = label("", "muted"), *spaceOverview = label("", "muted"),
            *overviewCamera = label("", "muted"), *locationSummary = label("", "muted");
@@ -354,17 +354,12 @@ class Manager : public QMainWindow {
                                   : I18n::tr("Choose an installation in Setup"));
         overviewPrefix->setText(text(s, "prefix"));
         overviewProton->setText(text(s, "proton"));
-        integrationVersion->setText(
-            text(installed, "version",
-                 s["integration_exists"].toBool() ? I18n::tr("Existing · unlinked")
-                                                  : I18n::tr("Not configured")));
-        fusionInfo->setText(I18n::tr("Fusion: %1\nIntegration: %2\nRevision: %3\nPrefix: %4\nProton: %5\nExecutable: %6")
+        integrationState->setText(
+            s["integration_exists"].toBool() ? I18n::tr("Installed") : I18n::tr("Not configured"));
+        fusionInfo->setText(I18n::tr("Fusion: %1\nRevision: %2\nPrefix: %3\nProton: %4\nExecutable: %5")
                                 .arg(text(s, "fusion_version", I18n::tr("Not installed")),
-                                     text(installed, "version",
-                                          s["integration_exists"].toBool()
-                                              ? I18n::tr("Installed; version metadata unavailable")
-                                              : I18n::tr("Not configured")),
-                                     text(installed, "revision"), text(s, "prefix"), text(s, "proton"),
+                                     text(installed, "revision", I18n::tr("Unknown")),
+                                     text(s, "prefix"), text(s, "proton"),
                                      text(s, "fusion", I18n::tr("Fusion360.exe not found"))));
         locationSummary->setText(QFileInfo(target->text()).fileName());
         locationSummary->setToolTip(target->text());
@@ -384,14 +379,13 @@ class Manager : public QMainWindow {
             else
                 repoSummary->setText(I18n::tr(r["checked"].isDouble() ? "Up to date" : "Check for updates"));
             repoSummary->setProperty("tone", dirty || ahead ? "warning" : "normal");
-            repoBranch->setText(text(r, "branch") + "  ·  " + text(r, "version", I18n::tr("Version unknown")));
+            repoBranch->setText(text(r, "branch"));
             repoCheck->setText(r["checked"].isDouble()
                                    ? I18n::tr("Checked %1").arg(QLocale().toString(
                                          QDateTime::fromSecsSinceEpoch(qint64(r["checked"].toDouble())),
                                          QLocale::ShortFormat))
                                    : I18n::tr("Remote not checked yet"));
-            gitInfo += "\n" + I18n::tr("Version: %1").arg(text(r, "version")) + "\n" +
-                       I18n::tr("Branch: %1").arg(text(r, "branch")) + "\n" +
+            gitInfo += "\n" + I18n::tr("Branch: %1").arg(text(r, "branch")) + "\n" +
                        I18n::tr("Revision: %1").arg(text(r, "revision")) + "\n" +
                        I18n::tr(dirty ? "Working tree: local changes" : "Working tree: clean");
             if (r["behind"].isDouble())
@@ -586,7 +580,7 @@ class Manager : public QMainWindow {
     void buildOverview() {
         QVBoxLayout *layout;
         page(I18n::tr("Overview"),
-             I18n::tr("Manage Fusion and its Linux integration. Version and update information comes from "
+             I18n::tr("Manage Fusion and its Linux integration. Status and update information comes from "
                       "the selected installation and Git checkout. Autodesk's own updater manages Fusion itself."),
              layout);
         auto *fusion = new QFrame;
@@ -613,7 +607,7 @@ class Manager : public QMainWindow {
         columns->setSpacing(16);
         auto *runtime = new QVBoxLayout;
         auto *fields = new QGridLayout;
-        field(fields, 0, I18n::tr("Integration"), integrationVersion);
+        field(fields, 0, I18n::tr("Integration"), integrationState);
         field(fields, 1, I18n::tr("Prefix"), overviewPrefix);
         field(fields, 2, "Proton", overviewProton);
         runtime->addLayout(fields);
@@ -1154,7 +1148,6 @@ class Manager : public QMainWindow {
         });
         mutationControls << language;
         railLayout->addWidget(language);
-        railLayout->addWidget(label("v1.2.0", "railnote"));
         shell->addWidget(rail);
         auto *workspace = new QWidget;
         workspace->setObjectName("workspace");

@@ -74,8 +74,8 @@ def snapshot(app):
     return backup
 
 
-def repository_state(repo, version):
-    state = {"version": version, "checkout": None, "revision": None,
+def repository_state(repo):
+    state = {"checkout": None, "revision": None,
              "remote": "https://github.com/Ibot-11/fusion-linux-dx11.git", "branch": "main"}
     if (repo / ".git").exists():
         def git(*args):
@@ -234,7 +234,7 @@ def deploy_spacemouse(repo, app, prefix, service=True, desktop=True, enable=True
     clean_legacy_spacemouse(dest)
 
 
-def deploy(repo, app, prefix, version, spacemouse=False, update=False, desktop=True, service=True, enable_spacemouse=False):
+def deploy(repo, app, prefix, spacemouse=False, update=False, desktop=True, service=True, enable_spacemouse=False):
     repo, app = Path(repo).resolve(), Path(app).resolve()
     valid_prefix(prefix)
     if fusion_running():
@@ -302,8 +302,8 @@ def deploy(repo, app, prefix, version, spacemouse=False, update=False, desktop=T
         deploy_spacemouse(repo, app, prefix, service, desktop, enabled)
     if desktop:
         deploy_desktop(app)
-    atomic_write(app / "repo-state.json", json.dumps(repository_state(repo, version), indent=2).encode(), 0o600)
-    print(f"Fusion Linux {version} installed. Existing settings preserved.")
+    atomic_write(app / "repo-state.json", json.dumps(repository_state(repo), indent=2).encode(), 0o600)
+    print("Fusion Linux installed. Existing settings preserved.")
     return backup
 
 
@@ -311,7 +311,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True, type=Path)
     parser.add_argument("--prefix", required=True)
-    parser.add_argument("--version", required=True)
     parser.add_argument("--spacemouse", action="store_true")
     parser.add_argument("--enable-spacemouse", action="store_true")
     parser.add_argument("--update", action="store_true")
@@ -320,7 +319,7 @@ def main():
         args.target.mkdir(parents=True, exist_ok=True)
         with (args.target / ".install.lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            deploy(REPO, args.target, args.prefix, args.version, args.spacemouse, args.update,
+            deploy(REPO, args.target, args.prefix, args.spacemouse, args.update,
                    enable_spacemouse=args.enable_spacemouse)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         raise SystemExit(f"Setup stopped: {error}")

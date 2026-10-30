@@ -96,7 +96,7 @@ Ein abweichender Ordner kann dem Terminal-Installer übergeben werden:
 Ein bereits heruntergeladener Autodesk-Installer lässt sich direkt verwenden:
 
 ```bash
-./install.sh --clean --installer "/pfad/zu/Fusion360installer.exe"
+./install.sh --clean --installer "/pfad/zu/FusionClientDownloader.exe"
 ```
 
 ### 4. Fusion starten
@@ -113,7 +113,7 @@ Für die Autodesk-Anmeldung werden HTTP-/HTTPS-Links über `xdg-open` mit dem St
 
 **Fusion Manager** über das Anwendungsmenü oder mit `fusion-manager` starten.
 
-- **Übersicht:** Fusion starten, Versionen anzeigen und die Linux-Integration aktualisieren.
+- **Übersicht:** Fusion starten, den Installationsstatus anzeigen und die Linux-Integration aktualisieren.
 - **SpaceMouse:** Achsen, Tastenkürzel und Kamerageschwindigkeit konfigurieren.
 - **Einrichtung:** Installation, Prefix, Proton-Laufzeit und Fusion-Skalierung auswählen.
 - **Aktivität:** Ausgaben einsehen und den Protokollordner öffnen.

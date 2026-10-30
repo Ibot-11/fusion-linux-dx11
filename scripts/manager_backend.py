@@ -74,8 +74,7 @@ def repository(repo):
         except subprocess.CalledProcessError:
             branch = 'Detached HEAD'
         result.update(valid=True, revision=revision, branch=branch,
-                      dirty=bool(git(repo, 'status', '--porcelain', '--untracked-files=normal')),
-                      version=repo_version(repo))
+                      dirty=bool(git(repo, 'status', '--porcelain', '--untracked-files=normal')))
         try:
             upstream = git(repo, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}')
             counts = git(repo, 'rev-list', '--left-right', '--count', 'HEAD...@{upstream}').split()
@@ -89,11 +88,6 @@ def repository(repo):
     except (OSError, subprocess.CalledProcessError) as error:
         result['error'] = str(error)
     return result
-
-
-def repo_version(repo):
-    match = re.search(r'^VERSION="([^"]+)"', read(repo / 'install.sh'), re.M)
-    return match[1] if match else None
 
 
 def proton_versions():

@@ -110,8 +110,8 @@ class ManagerTests(unittest.TestCase):
     def test_detached_checkout_is_still_a_real_checkout(self):
         checkout=self.root/'repo';subprocess.run(['git','init','-b','main',str(checkout)],check=True,capture_output=True)
         for key,value in [('user.name','Manager tests'),('user.email','tests@example.invalid')]:subprocess.run(['git','-C',str(checkout),'config',key,value],check=True)
-        (checkout/'install.sh').write_text('VERSION="9.8.7"\n');subprocess.run(['git','-C',str(checkout),'add','.'],check=True);subprocess.run(['git','-C',str(checkout),'commit','-m','test'],check=True,capture_output=True);subprocess.run(['git','-C',str(checkout),'checkout','--detach'],check=True,capture_output=True)
-        state=manager.repository(checkout);self.assertTrue(state['valid']);self.assertEqual(state['branch'],'Detached HEAD');self.assertEqual(state['version'],'9.8.7');self.assertFalse(state['dirty'])
+        (checkout/'marker').write_text('current checkout\n');subprocess.run(['git','-C',str(checkout),'add','.'],check=True);subprocess.run(['git','-C',str(checkout),'commit','-m','test'],check=True,capture_output=True);subprocess.run(['git','-C',str(checkout),'checkout','--detach'],check=True,capture_output=True)
+        state=manager.repository(checkout);self.assertTrue(state['valid']);self.assertEqual(state['branch'],'Detached HEAD');self.assertNotIn('version',state);self.assertFalse(state['dirty'])
 
     def test_missing_checkout_can_be_recreated_without_overwriting_files(self):
         publisher = self.root / 'publisher'

@@ -125,7 +125,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
 
     def deploy(self, **kwargs):
         with contextlib.redirect_stdout(io.StringIO()):
-            return setup_runtime.deploy(REPO, self.app, 'custom-prefix', 'test-version', desktop=False, service=False, **kwargs)
+            return setup_runtime.deploy(REPO, self.app, 'custom-prefix', desktop=False, service=False, **kwargs)
 
     def test_update_keeps_user_data_and_saves_replaced_files(self):
         originals = {'prefix-dir': 'custom-prefix\n', 'proton-version': 'My Proton\n',
@@ -151,7 +151,8 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.deploy()
         self.assertEqual((self.app / 'prefix-dir').read_text(), 'custom-prefix\n')
         self.assertEqual((self.app / 'proton-version').read_text(), 'Proton - Experimental\n')
-        self.assertEqual(json.loads((self.app / 'repo-state.json').read_text())['version'], 'test-version')
+        self.assertEqual(json.loads((self.app / 'repo-state.json').read_text())['checkout'], str(REPO))
+        self.assertNotIn('version', json.loads((self.app / 'repo-state.json').read_text()))
         self.assertTrue(os.access(self.app / 'update.py', os.X_OK))
         self.assertTrue((self.app / 'proton.py').is_file())
         self.assertTrue((self.app / 'fusion-language.py').is_file())
@@ -298,6 +299,12 @@ class PortabilityTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
         path.chmod(0o755)
+
+    def test_installer_uses_the_current_autodesk_downloader(self):
+        installer = (REPO / 'install.sh').read_text()
+        self.assertIn('Fusion%20Client%20Downloader.exe', installer)
+        self.assertIn('FusionClientDownloader.exe', installer)
+        self.assertNotIn('Fusion360installer.exe', installer)
 
     def test_run_proton_uses_custom_path_without_steam(self):
         custom = self.root / 'Custom Proton'
