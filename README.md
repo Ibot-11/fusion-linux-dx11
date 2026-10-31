@@ -19,7 +19,7 @@ Fusion is proprietary software and is not included. An Autodesk account and a va
 
 - A 64-bit Linux distribution with Vulkan-capable graphics drivers
 - Steam; the matching official **Proton Experimental** base for the first local runtime build
-- Python 3, Git, curl, a C/C++17 compiler, Make, pkg-config, Qt 6 Widgets development files and Vulkan headers
+- Python 3, Git, curl, a C/C++17 compiler, Make, pkg-config, Qt 6 Widgets development files
 - Bash, GNU coreutils, GNU findutils and `xdg-open` (`xdg-utils`)
 - Optional SpaceMouse support: a systemd user session; Polkit for the one-time device-access setup
 
@@ -27,18 +27,18 @@ Install the build dependencies:
 
 ```bash
 # Debian / Ubuntu
-sudo apt install build-essential pkg-config python3 git curl xdg-utils qt6-base-dev qt6-base-dev-tools libvulkan-dev
+sudo apt install build-essential pkg-config python3 git curl xdg-utils qt6-base-dev qt6-base-dev-tools
 
 # Fedora
-sudo dnf install gcc gcc-c++ make pkgconf-pkg-config python3 git curl xdg-utils qt6-qtbase-devel vulkan-headers
+sudo dnf install gcc gcc-c++ make pkgconf-pkg-config python3 git curl xdg-utils qt6-qtbase-devel
 
 # Arch Linux / CachyOS
-sudo pacman -S --needed base-devel pkgconf python git curl xdg-utils qt6-base vulkan-headers
+sudo pacman -S --needed base-devel pkgconf python git curl xdg-utils qt6-base
 ```
 
 In Steam, enable the Steam client, open **Library → Tools**, and install **Proton Experimental**. Install the appropriate Vulkan driver for your AMD, Intel or NVIDIA GPU using your distribution's packages.
 
-Fusion itself always uses **[Proton-Fusion](https://github.com/Ibot-11/Proton-Fusion)**. The installer selects an existing verified build or builds it in a permanent sibling `Proton-Fusion` checkout. The first local build additionally needs Clang/LLD, Autoconf, Bison/Flex and X11/XDamage development files. See the [runtime guide](https://github.com/Ibot-11/Proton-Fusion/blob/fusion/fusion/docs/INTEGRATION.de.md) for details and the complete SDK build.
+Fusion itself always uses **[Proton-Fusion](https://github.com/Ibot-11/Proton-Fusion)**. The installer selects an existing verified build or builds it in a permanent sibling `Proton-Fusion` checkout. The first local build additionally needs Clang/LLD, Autoconf, Bison/Flex and X11/XDamage development files. See the [runtime guide](https://github.com/Ibot-11/Proton-Fusion/blob/main/fusion/docs/INTEGRATION.de.md) for details and the complete SDK build.
 
 ## Installation
 
@@ -177,4 +177,4 @@ See [SpaceMouse compatibility and technical details](spacemouse/README.md).
 
 ## License
 
-The original launcher and Vulkan layer are MIT-licensed. The Manager and SpaceMouse bridge use GPL-3.0-or-later; included third-party components retain their respective licenses. See `LICENSE` and the notices under `spacemouse/`.
+The launcher is MIT-licensed. The Manager and SpaceMouse bridge use GPL-3.0-or-later; included third-party components retain their respective licenses. See `LICENSE` and the notices under `spacemouse/`.

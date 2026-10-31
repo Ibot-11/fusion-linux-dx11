@@ -208,6 +208,14 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.assertTrue((self.app / 'fusion-language.py').is_file())
         self.assertTrue((self.app / 'fusion_scale.py').is_file())
 
+    def test_retired_dxvk_defaults_migrate_to_the_runtime_profile(self):
+        legacy = (REPO / 'tests/fixtures/legacy-dxvk.conf').read_bytes()
+        (self.app / 'dxvk.conf').write_bytes(legacy)
+        backup = self.deploy(update=True)
+        self.assertEqual((backup / 'dxvk.conf').read_bytes(), legacy)
+        self.assertFalse((self.app / 'dxvk.conf').exists())
+        self.assertFalse((self.app / 'dxvk.conf.dist').exists())
+
     def test_static_gpu_preferences_migrate_without_evaluating_shell(self):
         marker = self.app / 'must-not-exist'
         (self.app / 'run-proton.sh').write_text(
@@ -275,7 +283,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
     def test_legacy_space_migration_preserves_user_camera_and_buttons(self):
         repo = self.root / 'fixture-repo'
         repo.mkdir()
-        for name in ('scripts', 'spacemouse', 'bin', 'layer', 'config', 'vendor'):
+        for name in ('scripts', 'spacemouse', 'config', 'vendor'):
             (repo / name).symlink_to(REPO / name, target_is_directory=True)
         (repo / '.build').mkdir()
         (repo / '.build/manager').symlink_to(REPO / '.build/manager', target_is_directory=True)

@@ -385,11 +385,8 @@ class IntegrationSafetyTests(unittest.TestCase):
             root = Path(temporary)
             repo = root / 'repo'
             repo.mkdir()
-            for name in ('scripts', 'spacemouse', 'desktop', 'bin', 'config', 'vendor'):
+            for name in ('scripts', 'spacemouse', 'desktop', 'config', 'vendor'):
                 shutil.copytree(REPO / name, repo / name, ignore=shutil.ignore_patterns('__pycache__'))
-            (repo / 'layer').mkdir()
-            shutil.copy2(REPO / 'layer/VkLayer_fusion_present_sync.json', repo / 'layer')
-            (repo / 'layer/libVkLayer_fusion_present_sync.so').write_bytes(b'fake layer')
             (repo / '.build/manager').mkdir(parents=True)
             for name in ('fusion-manager', 'fusion-spacemouse-access'):
                 (repo / '.build/manager' / name).write_bytes(b'fake binary')

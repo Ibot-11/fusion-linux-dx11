@@ -21,7 +21,6 @@ Usage: ./install.sh [MODE] [INSTALLATION_FOLDER] [OPTIONS]
   --finish-install    Confirm Autodesk setup completed and finish integration
   --update, -u        Update the Git branch and install the new revision
   --apply-update      Apply the current checkout without downloading updates
-  --build-layer       Build the Vulkan layer only
   --with-spacemouse   Build and enable SpaceMouse support
   --without-spacemouse Keep the SpaceMouse component unchanged
   --prefix NAME       Prefix folder for a new installation
@@ -37,7 +36,7 @@ HELP
 while (($#)); do
   case "$1" in
     --help|-h) usage; exit 0 ;;
-    --patch|--clean|--resume-clean|--update|--apply-update|--build-layer|-u)
+    --patch|--clean|--resume-clean|--update|--apply-update|-u)
       [[ "$MODE" == menu ]] || { echo 'Choose only one mode.' >&2; exit 1; }
       MODE="${1#--}"; [[ "$MODE" == -u ]] && MODE=update
       ;;
@@ -72,17 +71,14 @@ if [[ "$MODE" == menu ]]; then
   echo '1) Set up an existing installation'
   echo '2) New installation'
   echo '3) Update from the Git repository'
-  echo '4) Build the Vulkan layer only'
-  echo '5) Exit'
-  read -rp 'Choose [1-5]: ' choice
+  echo '4) Exit'
+  read -rp 'Choose [1-4]: ' choice
   case "$choice" in
     1) MODE=patch ;; 2) MODE=clean ;; 3) MODE=update ;;
-    4) MODE=build-layer ;; 5) exit 0 ;; *) exit 1 ;;
+    4) exit 0 ;; *) exit 1 ;;
   esac
-  if [[ "$MODE" != build-layer ]]; then
-    read -rp "Installation folder [$TARGET_DIR]: " chosen
-    TARGET_DIR="${chosen:-$TARGET_DIR}"
-  fi
+  read -rp "Installation folder [$TARGET_DIR]: " chosen
+  TARGET_DIR="${chosen:-$TARGET_DIR}"
 fi
 
 command -v python3 >/dev/null || { echo 'Install Python 3 to continue.' >&2; exit 1; }
@@ -112,11 +108,6 @@ fi
 for tool in cc make; do
   command -v "$tool" >/dev/null || { echo "Install $tool (build-essential / base-devel) to continue." >&2; exit 1; }
 done
-if [[ "$MODE" == build-layer ]]; then
-  make -C "$SCRIPT_DIR/layer"
-  exit 0
-fi
-
 python3 - "$SCRIPT_DIR" <<'PYCODE'
 from pathlib import Path
 import sys

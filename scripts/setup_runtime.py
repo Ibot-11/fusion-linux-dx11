@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import datetime
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -32,9 +33,12 @@ RUNTIME_FILES = ("launch.sh", "run-proton.sh", "switch-mode.sh", "browser-listen
                  "fusion-language.py", "fusion_scale.py", "manager_backend.py", "manager.sh", "fusion_runtime.py")
 SPACE_HELPERS = ("start.py", "evdev_input.py", "keybindings.py", "camera_control.py", "hidraw_input.py", "processes.py", "control.py", "install-sdk.py",
                  "camera_gain.py", "camera-settings.sh", "settings.sh")
-MANAGED = (*RUNTIME_FILES, "processes.py", "panel-fix.exe", "panel-fix.c",
-           "libVkLayer_fusion_present_sync.so", "VkLayer_fusion_present_sync.json",
-           "libVkLayer_fusion_present_sync.c",
+RETIRED_RUNTIME_FILES = ("panel-fix.exe", "panel-fix.c", "libVkLayer_fusion_present_sync.so",
+                         "VkLayer_fusion_present_sync.json", "libVkLayer_fusion_present_sync.c")
+# Recognize the former generated configuration during migration without shipping
+# another active set of defaults alongside Proton-Fusion's profile.
+LEGACY_DXVK_SHA256 = "b67cad363b6e286e547b11bd8f185d1614a5593d757f88956c014cc39276a147"
+MANAGED = (*RUNTIME_FILES, "processes.py", *RETIRED_RUNTIME_FILES,
            "vendor", "spacemouse", "dxvk.conf", "dxvk.conf.dist", "prefix-dir",
             "proton-version", "proton-path", "runtime-lock.json", "repo-state.json", "spacemouse-enabled", "fusion-manager", "gpu.conf")
 
@@ -460,12 +464,12 @@ def _deploy(repo, app, prefix, spacemouse=False, update=False, desktop=True, ser
     for helper in ("processes.py", "evdev_input.py", "keybindings.py", "camera_control.py", "hidraw_input.py", "camera_gain.py"):
         copy_file(repo / "spacemouse" / helper, app / "spacemouse" / helper)
     copy_file(repo / ".build/manager/fusion-spacemouse-access", app / "spacemouse/fusion-spacemouse-access", True)
-    for name in ("panel-fix.exe", "panel-fix.c", "libVkLayer_fusion_present_sync.so", "libVkLayer_fusion_present_sync.c", "VkLayer_fusion_present_sync.json"):
+    for name in RETIRED_RUNTIME_FILES:
         (app / name).unlink(missing_ok=True)
     defaults = (Path(runtime['path']) / 'fusion/dxvk.conf').read_bytes()
-    legacy_defaults = (repo / 'config/dxvk.conf').read_bytes()
     config_file = app / 'dxvk.conf'
-    if config_file.is_file() and config_file.read_bytes() in (defaults, legacy_defaults):
+    config_bytes = config_file.read_bytes() if config_file.is_file() else None
+    if config_bytes is not None and (config_bytes == defaults or hashlib.sha256(config_bytes).hexdigest() == LEGACY_DXVK_SHA256):
         # The generated defaults now belong to the Proton profile.
         config_file.unlink()
     if config_file.exists():

@@ -19,7 +19,7 @@ Fusion ist proprietäre Software und nicht Bestandteil dieses Repositories. Ein 
 
 - Eine 64-Bit-Linux-Distribution mit Vulkan-fähigen Grafiktreibern
 - Steam; für den ersten lokalen Runtime-Build die passende offizielle Basis **Proton Experimental**
-- Python 3, Git, curl, ein C/C++17-Compiler, Make, pkg-config, Qt-6-Widgets-Entwicklungsdateien und Vulkan-Header
+- Python 3, Git, curl, ein C/C++17-Compiler, Make, pkg-config, Qt-6-Widgets-Entwicklungsdateien
 - Bash, GNU coreutils, GNU findutils und `xdg-open` (`xdg-utils`)
 - Optional für SpaceMouse: eine systemd-Benutzersitzung; Polkit für die einmalige Einrichtung des Gerätezugriffs
 
@@ -27,18 +27,18 @@ Build-Abhängigkeiten installieren:
 
 ```bash
 # Debian / Ubuntu
-sudo apt install build-essential pkg-config python3 git curl xdg-utils qt6-base-dev qt6-base-dev-tools libvulkan-dev
+sudo apt install build-essential pkg-config python3 git curl xdg-utils qt6-base-dev qt6-base-dev-tools
 
 # Fedora
-sudo dnf install gcc gcc-c++ make pkgconf-pkg-config python3 git curl xdg-utils qt6-qtbase-devel vulkan-headers
+sudo dnf install gcc gcc-c++ make pkgconf-pkg-config python3 git curl xdg-utils qt6-qtbase-devel
 
 # Arch Linux / CachyOS
-sudo pacman -S --needed base-devel pkgconf python git curl xdg-utils qt6-base vulkan-headers
+sudo pacman -S --needed base-devel pkgconf python git curl xdg-utils qt6-base
 ```
 
 Steam starten und unter **Bibliothek → Werkzeuge** das Laufzeitwerkzeug **Proton Experimental** installieren. Außerdem den passenden Vulkan-Treiber für die AMD-, Intel- oder NVIDIA-GPU aus den Paketquellen der Distribution installieren.
 
-Fusion selbst verwendet ausschließlich **[Proton-Fusion](https://github.com/Ibot-11/Proton-Fusion)**. Der Installer verwendet einen vorhandenen geprüften Build oder baut ihn beim ersten Einrichten in einem dauerhaften Geschwisterordner `Proton-Fusion`. Dafür zusätzlich Clang/LLD, Autoconf, Bison/Flex und X11-/XDamage-Entwicklungsdateien bereitstellen. Einzelheiten und der vollständige SDK-Build stehen in der [Runtime-Anleitung](https://github.com/Ibot-11/Proton-Fusion/blob/fusion/fusion/docs/INTEGRATION.de.md).
+Fusion selbst verwendet ausschließlich **[Proton-Fusion](https://github.com/Ibot-11/Proton-Fusion)**. Der Installer verwendet einen vorhandenen geprüften Build oder baut ihn beim ersten Einrichten in einem dauerhaften Geschwisterordner `Proton-Fusion`. Dafür zusätzlich Clang/LLD, Autoconf, Bison/Flex und X11-/XDamage-Entwicklungsdateien bereitstellen. Einzelheiten und der vollständige SDK-Build stehen in der [Runtime-Anleitung](https://github.com/Ibot-11/Proton-Fusion/blob/main/fusion/docs/INTEGRATION.de.md).
 
 ## Installation
 
@@ -177,4 +177,4 @@ Weitere Informationen: [SpaceMouse-Kompatibilität und technische Details](space
 
 ## Lizenz
 
-Der ursprüngliche Starter und der Vulkan-Layer stehen unter der MIT-Lizenz. Der Manager und die SpaceMouse-Brücke verwenden GPL-3.0-or-later; enthaltene Drittkomponenten behalten ihre jeweiligen Lizenzen. Siehe `LICENSE` und die Hinweise unter `spacemouse/`.
+Der Starter steht unter der MIT-Lizenz. Der Manager und die SpaceMouse-Brücke verwenden GPL-3.0-or-later; enthaltene Drittkomponenten behalten ihre jeweiligen Lizenzen. Siehe `LICENSE` und die Hinweise unter `spacemouse/`.
