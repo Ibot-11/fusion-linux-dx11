@@ -25,11 +25,12 @@ Usage: ./install.sh [MODE] [INSTALLATION_FOLDER] [OPTIONS]
   --with-spacemouse   Build and enable SpaceMouse support
   --without-spacemouse Keep the SpaceMouse component unchanged
   --prefix NAME       Prefix folder for a new installation
-  --proton FOLDER     Use an installed Proton folder
+  --proton FOLDER     Use a verified Proton-Fusion runtime
   --installer FILE    Use an existing Autodesk installer EXE with --clean
   --help, -h          Show help
-With no arguments, opens the menu. Updates preserve prefix, Proton, GPU, DXVK
-and SpaceMouse settings. Close Fusion before installing or updating.
+With no arguments, opens the menu. Updates preserve the prefix and custom GPU,
+DXVK and SpaceMouse settings, and pin a verified Proton-Fusion runtime.
+Close Fusion before installing or updating.
 HELP
 }
 
@@ -135,6 +136,11 @@ if [[ "$MODE" == resume-clean && ! -d "$TARGET_DIR" ]]; then
 fi
 
 PREFIX="${REQUESTED_PREFIX:-compatdata-exp-dx11}"
+if [[ -n "$REQUESTED_PROTON" ]]; then
+  REQUESTED_PROTON="$(python3 "$SCRIPT_DIR/scripts/fusion_runtime.py" select "$REQUESTED_PROTON")"
+else
+  REQUESTED_PROTON="$(python3 "$SCRIPT_DIR/scripts/prepare_proton.py" "$SCRIPT_DIR")"
+fi
 if [[ -z "$REQUESTED_PREFIX" && "$MODE" != clean && -f "$TARGET_DIR/prefix-dir" ]]; then
   PREFIX="$(cat "$TARGET_DIR/prefix-dir")"
 fi
@@ -190,7 +196,6 @@ for manager_tool in c++ pkg-config; do
   command -v "$manager_tool" >/dev/null || { echo "Fusion Manager requires $manager_tool." >&2; exit 1; }
 done
 pkg-config --exists Qt6Widgets || { echo 'Fusion Manager requires Qt 6 Widgets development files (qt6-base-dev / qt6-base).' >&2; exit 1; }
-make -C "$SCRIPT_DIR/layer"
 make -C "$SCRIPT_DIR/manager"
 if [[ "$SPACE" == on ]]; then
   command -v systemctl >/dev/null || { echo 'SpaceMouse requires a systemd user session.' >&2; exit 1; }
@@ -212,22 +217,11 @@ if [[ "$MODE" == clean || "$MODE" == resume-clean ]]; then
 fi
 
 setup_args=(--target "$TARGET_DIR" --prefix "$PREFIX")
+setup_args+=(--proton "$REQUESTED_PROTON")
 [[ "$MODE" == apply-update ]] && setup_args+=(--update)
 [[ "$SPACE" == on ]] && setup_args+=(--spacemouse)
 [[ "$ENABLE_SPACE" == 1 ]] && setup_args+=(--enable-spacemouse)
 python3 "$SCRIPT_DIR/scripts/setup_runtime.py" "${setup_args[@]}"
-if [[ -n "$REQUESTED_PROTON" ]]; then
-  python3 - "$TARGET_DIR" "$REQUESTED_PROTON" <<'PYCODE'
-from pathlib import Path
-import sys
-app, proton = map(Path, sys.argv[1:])
-proton = proton.expanduser().resolve()
-if not (proton / 'proton').is_file(): raise SystemExit('The selected Proton folder does not contain a proton launcher.')
-(app / 'proton-version').write_text(proton.name + '\n')
-(app / 'proton-path').write_text(str(proton) + '\n')
-PYCODE
-fi
-
 echo 'Done. Manage: fusion-manager; Launch: autodesk-fusion; Update: autodesk-fusion-update'
 if [[ "$SPACE" == on ]]; then
   echo 'SpaceMouse: adjust axes, buttons and camera in Fusion Manager. In Fusion, use the Legacy SpaceMouse driver.'

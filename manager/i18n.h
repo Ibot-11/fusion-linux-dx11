@@ -231,7 +231,7 @@ inline const QHash<QString, QString> &german() {
         {"Selected: %1 % · Current Windows DPI: %2 % · The selection is applied again at the next Fusion launch", "Ausgewählt: %1 % · Aktueller Windows-DPI-Wert: %2 % · Die Auswahl wird beim nächsten Fusion-Start erneut angewendet"},
         {"Scaling saved · Restart Fusion", "Skalierung gespeichert · Fusion neu starten"},
         {"The selected Wine prefix does not exist yet.", "Das ausgewählte Wine-Präfix existiert noch nicht."},
-        {"Select an existing Wine prefix and an installed Proton version. Their folders are preserved. Proton paths are available as item tooltips. A new installation may use a new prefix name; applying a runtime selection requires an existing prefix.", "Wählen Sie ein vorhandenes Wine-Präfix und eine installierte Proton-Version. Ihre Ordner bleiben erhalten. Proton-Pfade sind als Element-Tooltips verfügbar. Eine neue Installation kann einen neuen Präfixnamen verwenden; zum Anwenden einer Laufzeitauswahl ist ein vorhandenes Präfix erforderlich."},
+        {"Fusion always uses a verified Proton-Fusion build. The installer prepares it automatically when needed. Select an existing prefix to apply a runtime build.", "Fusion verwendet immer einen geprüften Proton-Fusion-Build. Der Installer richtet ihn bei Bedarf automatisch ein. Wählen Sie zum Anwenden eines Builds ein vorhandenes Präfix."},
         {"Install Fusion", "Fusion installieren"},
         {"Adopt existing", "Vorhandene übernehmen"},
         {"Apply checkout", "Arbeitskopie anwenden"},

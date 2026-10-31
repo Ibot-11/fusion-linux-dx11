@@ -24,6 +24,7 @@ from camera_control import selected_status, runtime_dir
 from hidraw_input import discover as discover_hidraw
 import proton
 import fusion_scale
+import fusion_runtime
 
 
 def atomic(path, value):
@@ -119,7 +120,7 @@ def repository(repo):
 
 def proton_versions():
     steam = proton.steam_root()
-    return str(steam) if steam else None, proton.installed()
+    return str(steam) if steam else None, fusion_runtime.installed()
 
 
 def find_fusion(app, prefix):
@@ -171,7 +172,15 @@ def status(app, repo):
     pending = clean is not None and (not clean['valid'] or clean['phase'] != 'complete')
     prefix = clean['prefix'] if pending and clean['valid'] else read(app / 'prefix-dir', 'compatdata-exp-dx11')
     proton_path = clean['proton_path'] if pending and clean['valid'] else read(app / 'proton-path')
-    proton_name = Path(proton_path).name if pending and clean['valid'] else read(app / 'proton-version', 'Proton - Experimental')
+    proton_name = 'Proton-Fusion'
+    runtime_state = None
+    runtime_error = None
+    try:
+        runtime_state = fusion_runtime.validate(proton_path) if pending and clean['valid'] else fusion_runtime.resolve(app)
+        proton_name += ' · ' + runtime_state['build_id']
+        proton_path = runtime_state['path']
+    except ValueError as problem:
+        runtime_error = str(problem)
     try:
         prefix = valid_prefix(prefix)
         prefix_path = app / prefix
@@ -222,6 +231,7 @@ def status(app, repo):
             'scale_target_dpi': scale_target_dpi,
             'scale_target_percent': fusion_scale.nearest_percent(scale_target_dpi) if scale_target_dpi else None,
             'proton': proton_name, 'proton_path': proton_path, 'protons': protons, 'steam': steam,
+            'runtime': runtime_state, 'runtime_error': runtime_error,
             'fusion': str(fusion) if fusion else None, 'fusion_version': fusion_version(fusion),
             'running': fusion_running(), 'installed': read_json(app / 'repo-state.json'),
             'repo': repository(repo), 'spacemouse_enabled': (app / 'spacemouse-enabled').exists(),
@@ -303,6 +313,7 @@ def action(args, app, repo):
             raise ValueError('Fusion is already running.')
         if not (app / 'launch.sh').is_file():
             raise ValueError('The Linux integration is missing. Set it up first.')
+        fusion_runtime.resolve(app)
         (app / 'logs').mkdir(exist_ok=True)
         with (app / 'logs/manager-launch.log').open('ab') as log:
             subprocess.Popen([str(app / 'launch.sh')], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -313,11 +324,9 @@ def action(args, app, repo):
         if not (app / prefix / 'pfx').is_dir():
             raise ValueError('The selected Wine prefix does not exist.')
         proton = Path(args.proton or '').expanduser().resolve()
-        if not (proton / 'proton').is_file():
-            raise ValueError('Select an installed Proton folder.')
+        fusion_runtime.validate(proton)
         atomic(app / 'prefix-dir', prefix + '\n')
-        atomic(app / 'proton-version', proton.name + '\n')
-        atomic(app / 'proton-path', str(proton) + '\n')
+        fusion_runtime.bind(app, proton)
         print('Prefix and Proton saved.', flush=True)
     elif name == 'scale':
         closed()

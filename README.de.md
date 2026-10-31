@@ -6,9 +6,9 @@ Autodesk Fusion unter Linux mit Proton, DXVK und einem nativen Qt-Manager ausfü
 
 ## Funktionen
 
-- DirectX-11-Darstellung mit Proton Experimental und DXVK
+- DirectX-11-Darstellung mit dem eigenen Proton-Fusion und DXVK
 - Grafische Installation, Updates und Laufzeitauswahl mit dem Fusion Manager
-- Isolierte Wine-Prefixes und ein OpenGL-Fallback-Profil
+- Isolierte Wine-Prefixes und eine fest gebundene, geprüfte Proton-Fusion-Laufzeit
 - Konfigurierbare Fusion-Skalierung, automatisch oder 100 % bis 200 %
 - Optionale SpaceMouse-Unterstützung für Achsen, Tasten und Kamerageschwindigkeit
 - Manager-Oberfläche auf Deutsch und Englisch
@@ -18,7 +18,7 @@ Fusion ist proprietäre Software und nicht Bestandteil dieses Repositories. Ein 
 ## Voraussetzungen
 
 - Eine 64-Bit-Linux-Distribution mit Vulkan-fähigen Grafiktreibern
-- Steam mit installiertem **Proton Experimental**
+- Steam; für den ersten lokalen Runtime-Build die passende offizielle Basis **Proton Experimental**
 - Python 3, Git, curl, ein C/C++17-Compiler, Make, pkg-config, Qt-6-Widgets-Entwicklungsdateien und Vulkan-Header
 - Bash, GNU coreutils, GNU findutils und `xdg-open` (`xdg-utils`)
 - Optional für SpaceMouse: eine systemd-Benutzersitzung; Polkit für die einmalige Einrichtung des Gerätezugriffs
@@ -37,6 +37,8 @@ sudo pacman -S --needed base-devel pkgconf python git curl xdg-utils qt6-base vu
 ```
 
 Steam starten und unter **Bibliothek → Werkzeuge** das Laufzeitwerkzeug **Proton Experimental** installieren. Außerdem den passenden Vulkan-Treiber für die AMD-, Intel- oder NVIDIA-GPU aus den Paketquellen der Distribution installieren.
+
+Fusion selbst verwendet ausschließlich **[Proton-Fusion](https://github.com/Ibot-11/Proton-Fusion)**. Der Installer verwendet einen vorhandenen geprüften Build oder baut ihn beim ersten Einrichten in einem dauerhaften Geschwisterordner `Proton-Fusion`. Dafür zusätzlich Clang/LLD, Autoconf, Bison/Flex und X11-/XDamage-Entwicklungsdateien bereitstellen. Einzelheiten und der vollständige SDK-Build stehen in der [Runtime-Anleitung](https://github.com/Ibot-11/Proton-Fusion/blob/fusion/fusion/docs/INTEGRATION.de.md).
 
 ## Installation
 
@@ -74,7 +76,7 @@ Ohne Argumente öffnet `./install.sh` ein interaktives Menü.
 Für eine **neue Installation** im Fusion Manager:
 
 1. **Einrichtung** öffnen und einen leeren Installationsordner auswählen.
-2. Die installierte Proton-Laufzeit und optional einen anderen Prefix-Namen wählen.
+2. Einen geprüften Proton-Fusion-Build und optional einen anderen Prefix-Namen wählen. Fehlt die Laufzeit, richtet der Installer sie ein.
 3. **SpaceMouse einbeziehen** nur aktiviert lassen, wenn diese optionale Anbindung gewünscht ist.
 4. **Fusion installieren** wählen und dem offiziellen Autodesk-Installer folgen.
 5. Fusion nach Abschluss des Autodesk-Setups schließen.
@@ -136,7 +138,7 @@ Wine-Diagnosemeldungen sind standardmäßig deaktiviert. Für einen Terminalstar
 
 In der Seitenleiste **English** oder **Deutsch** wählen und den Neustart bestätigen. Die Auswahl ändert den Manager und wird beim nächsten Start auf die Fusion-Benutzersprache angewendet.
 
-Zum Wechseln des Grafikprofils Fusion schließen und im Installationsordner `./switch-mode.sh exp-dx11` oder `./switch-mode.sh ge-opengl` ausführen. Das OpenGL-Profil verwendet das neueste installierte GE-Proton und das `compatdata`-Prefix; `./switch-mode.sh status` zeigt die aktive Auswahl.
+Fusion verwendet immer Proton-Fusion. Der Manager zeigt ausschließlich geprüfte Builds dieses Forks an; beim Start werden Build-ID und Datei-Hashes geprüft. `./switch-mode.sh status` zeigt die gebundene Laufzeit. Ein stiller Wechsel auf Steam Experimental oder GE-Proton findet nicht statt.
 
 Auf hochauflösenden Bildschirmen lässt sich die Fusion-Skalierung unter **Einrichtung → Skalierung** anpassen. **Automatisch** übernimmt die Skalierung des Hauptbildschirms; alternativ sind 100 % bis 200 % verfügbar. Fusion muss dafür geschlossen sein.
 

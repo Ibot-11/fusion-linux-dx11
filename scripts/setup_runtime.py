@@ -24,17 +24,19 @@ sys.path.insert(0, str(REPO / "spacemouse"))
 from processes import fusion_running
 sys.path.insert(0, str(REPO / "scripts"))
 import proton
+import fusion_runtime
 
 WINE_SERVER_ROOT = Path("/tmp")
 RUNTIME_FILES = ("launch.sh", "run-proton.sh", "switch-mode.sh", "browser-listener.py",
                  "browser-request.py", "callback.py", "window-fix.py", "update.py", "proton.py",
-                 "fusion-language.py", "fusion_scale.py", "manager_backend.py", "manager.sh")
+                 "fusion-language.py", "fusion_scale.py", "manager_backend.py", "manager.sh", "fusion_runtime.py")
 SPACE_HELPERS = ("start.py", "evdev_input.py", "keybindings.py", "camera_control.py", "hidraw_input.py", "processes.py", "control.py", "install-sdk.py",
                  "camera_gain.py", "camera-settings.sh", "settings.sh")
 MANAGED = (*RUNTIME_FILES, "processes.py", "panel-fix.exe", "panel-fix.c",
            "libVkLayer_fusion_present_sync.so", "VkLayer_fusion_present_sync.json",
+           "libVkLayer_fusion_present_sync.c",
            "vendor", "spacemouse", "dxvk.conf", "dxvk.conf.dist", "prefix-dir",
-            "proton-version", "proton-path", "repo-state.json", "spacemouse-enabled", "fusion-manager", "gpu.conf")
+            "proton-version", "proton-path", "runtime-lock.json", "repo-state.json", "spacemouse-enabled", "fusion-manager", "gpu.conf")
 
 
 class WineInUse(ValueError):
@@ -431,18 +433,19 @@ def deploy_spacemouse(repo, app, prefix, service=True, desktop=True, enable=True
     clean_legacy_spacemouse(dest)
 
 
-def deploy(repo, app, prefix, spacemouse=False, update=False, desktop=True, service=True, enable_spacemouse=False):
+def deploy(repo, app, prefix, spacemouse=False, update=False, desktop=True, service=True, enable_spacemouse=False, selected_proton=None):
     valid_prefix(prefix)
     with wine_server_lock(Path(app) / prefix / "pfx", wait=5) as registry_locked:
         return _deploy(repo, app, prefix, spacemouse, update, desktop, service, enable_spacemouse,
-                       registry_locked=registry_locked)
+                       registry_locked=registry_locked, selected_proton=selected_proton)
 
 
-def _deploy(repo, app, prefix, spacemouse=False, update=False, desktop=True, service=True, enable_spacemouse=False, registry_locked=False):
+def _deploy(repo, app, prefix, spacemouse=False, update=False, desktop=True, service=True, enable_spacemouse=False, registry_locked=False, selected_proton=None):
     repo, app = Path(repo).resolve(), Path(app).resolve()
     valid_prefix(prefix)
     if fusion_running():
         raise ValueError("Close Fusion before installing or updating.")
+    runtime = fusion_runtime.select(selected_proton)
     app.mkdir(parents=True, exist_ok=True)
     backup = snapshot(app)
     print(f"Backup: {backup}")
@@ -457,28 +460,29 @@ def _deploy(repo, app, prefix, spacemouse=False, update=False, desktop=True, ser
     for helper in ("processes.py", "evdev_input.py", "keybindings.py", "camera_control.py", "hidraw_input.py", "camera_gain.py"):
         copy_file(repo / "spacemouse" / helper, app / "spacemouse" / helper)
     copy_file(repo / ".build/manager/fusion-spacemouse-access", app / "spacemouse/fusion-spacemouse-access", True)
-    for name in ("panel-fix.exe", "panel-fix.c"):
-        copy_file(repo / "bin" / name, app / name, name.endswith(".exe"))
-    copy_file(repo / "layer/libVkLayer_fusion_present_sync.so", app / "libVkLayer_fusion_present_sync.so")
-    layer = json.loads((repo / "layer/VkLayer_fusion_present_sync.json").read_text())
-    layer["layer"]["library_path"] = str(app / "libVkLayer_fusion_present_sync.so")
-    atomic_write(app / "VkLayer_fusion_present_sync.json", json.dumps(layer, indent=2).encode())
-    defaults = (repo / "config/dxvk.conf").read_bytes()
-    if not (app / "dxvk.conf").exists():
-        atomic_write(app / "dxvk.conf", defaults)
-    else:
+    for name in ("panel-fix.exe", "panel-fix.c", "libVkLayer_fusion_present_sync.so", "libVkLayer_fusion_present_sync.c", "VkLayer_fusion_present_sync.json"):
+        (app / name).unlink(missing_ok=True)
+    defaults = (Path(runtime['path']) / 'fusion/dxvk.conf').read_bytes()
+    legacy_defaults = (repo / 'config/dxvk.conf').read_bytes()
+    config_file = app / 'dxvk.conf'
+    if config_file.is_file() and config_file.read_bytes() in (defaults, legacy_defaults):
+        # The generated defaults now belong to the Proton profile.
+        config_file.unlink()
+    if config_file.exists():
         atomic_write(app / "dxvk.conf.dist", defaults)
+    else:
+        (app / 'dxvk.conf.dist').unlink(missing_ok=True)
     shutil.copytree(repo / "vendor", app / "vendor", dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
     if not update or not (app / "prefix-dir").exists():
         atomic_write(app / "prefix-dir", (prefix + "\n").encode(), 0o600)
-    if not update or not (app / "proton-version").exists():
-        atomic_write(app / "proton-version", b"Proton - Experimental\n", 0o600)
+    fusion_runtime.bind(app, runtime['path'])
     (app / "logs").mkdir(exist_ok=True)
     (app / "cache").mkdir(exist_ok=True)
     fusion = find_fusion(app, prefix)
     if fusion:
         # Preserve custom DXVK choices in the production folder as well.
-        copy_file(app / "dxvk.conf", fusion.parent / "dxvk.conf")
+        if config_file.exists():
+            copy_file(config_file, fusion.parent / "dxvk.conf")
         compiler = fusion.parent / "d3dcompiler_47.dll"
         system32 = app / prefix / "pfx/drive_c/windows/system32"
         if compiler.exists() and compiler.stat().st_size > 2 * 1024 * 1024 and system32.is_dir():
@@ -547,9 +551,7 @@ def clean_install(app, prefix, selected_proton, spacemouse, installer, resume=No
             check_clean_service(app)
         if selected_proton and not (Path(selected_proton).expanduser() / "proton").is_file():
             raise ValueError("The selected Proton folder does not contain a proton launcher.")
-        selected = proton.find("Proton - Experimental", selected_proton)
-        if not selected:
-            raise ValueError("Proton not found. Install Proton Experimental or select a Proton folder.")
+        selected = Path(fusion_runtime.select(selected_proton)['path'])
         installer_path = Path(installer).expanduser().resolve() if installer else None
         if installer_path and not installer_path.is_file():
             raise ValueError(f"Installer not found: {installer_path}")
@@ -570,8 +572,7 @@ def clean_install(app, prefix, selected_proton, spacemouse, installer, resume=No
         check_desktop_conflicts(app)
         if state["spacemouse"]:
             check_clean_service(app)
-        if not (Path(state["proton_path"]) / "proton").is_file():
-            raise ValueError("The Proton selected for this installation is no longer available.")
+        fusion_runtime.validate(state['proton_path'])
 
     prefix = state["prefix"]
     compat = app / prefix
@@ -608,13 +609,12 @@ def clean_install(app, prefix, selected_proton, spacemouse, installer, resume=No
     if state["phase"] == "prepared":
         print("Preparing Linux integration and the selected Proton prefix...", flush=True)
         deploy(REPO, app, prefix, state["spacemouse"], update=True, desktop=False, service=False,
-               enable_spacemouse=state["spacemouse"])
+               enable_spacemouse=state["spacemouse"], selected_proton=state['proton_path'])
         deploy_desktop(app, protect_existing=True)
         if state["spacemouse"]:
             install_clean_service(app)
         selected = Path(state["proton_path"])
-        atomic_write(app / "proton-version", (selected.name + "\n").encode(), 0o600)
-        atomic_write(app / "proton-path", (str(selected) + "\n").encode(), 0o600)
+        fusion_runtime.bind(app, selected)
         with wine_server_lock(pfx, wait=5) as locked:
             if locked != state["pfx_identity"]:
                 raise ValueError("The Wine prefix was replaced; refusing to initialize it.")
@@ -712,7 +712,7 @@ def clean_install(app, prefix, selected_proton, spacemouse, installer, resume=No
         if not find_fusion(app, prefix):
             raise ValueError("Fusion360.exe was not found; Autodesk installation is unconfirmed.")
         _deploy(REPO, app, prefix, state["spacemouse"], update=True, desktop=False, service=False,
-                enable_spacemouse=state["spacemouse"])
+                enable_spacemouse=state["spacemouse"], selected_proton=state['proton_path'])
         deploy_desktop(app, protect_existing=True)
         if state["spacemouse"]:
             install_clean_service(app)
@@ -768,7 +768,7 @@ def main():
                 else:
                     require_complete_clean(args.target)
                     deploy(REPO, args.target, args.prefix, args.spacemouse, args.update,
-                           enable_spacemouse=args.enable_spacemouse)
+                           enable_spacemouse=args.enable_spacemouse, selected_proton=args.proton)
             finally:
                 marker = args.target / "clean-install.json"
                 if args.clean_install and not marker.exists() and not marker.is_symlink():

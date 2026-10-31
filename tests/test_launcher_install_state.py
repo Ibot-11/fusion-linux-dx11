@@ -7,9 +7,13 @@ import subprocess
 import tempfile
 import time
 import unittest
+import sys
+from runtime_fixture import make_runtime
 
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO/'scripts'))
+import fusion_runtime
 
 
 class LauncherInstallStateTests(unittest.TestCase):
@@ -33,7 +37,7 @@ class LauncherInstallStateTests(unittest.TestCase):
         self.executable(self.commands / 'systemctl', '#!/bin/sh\nprintf "systemctl %s\\n" "$*" >> "$TEST_CALLS"\n')
         shutil.copy2(REPO / 'scripts/launch.sh', self.app / 'launch.sh')
         (self.app / 'launch.sh').chmod(0o755)
-        for name in ('manager_backend.py', 'proton.py', 'fusion_scale.py'):
+        for name in ('manager_backend.py', 'proton.py', 'fusion_scale.py', 'fusion_runtime.py'):
             shutil.copy2(REPO / 'scripts' / name, self.app / name)
         shutil.copy2(REPO / 'spacemouse/processes.py', self.app / 'processes.py')
         space = self.app / 'spacemouse'
@@ -48,10 +52,17 @@ class LauncherInstallStateTests(unittest.TestCase):
         (self.app / 'fusion-dpi').write_text('144\n')
         (self.app / 'spacemouse-enabled').touch()
         (self.app / '.install.lock').touch()
+        self.runtime = make_runtime(self.root/'Proton-Fusion')
+        fusion_runtime.bind(self.app, self.runtime)
         for name in ('fusion-language.py', 'browser-listener.py', 'window-fix.py', 'spacemouse/install-sdk.py'):
             (self.app / name).write_text('import os\nopen(os.environ["TEST_CALLS"], "a").write("helper started\\n")\n')
         (self.app / 'panel-fix.exe').touch()
         self.executable(self.app / 'run-proton.sh', '#!/bin/sh\nprintf "proton %s\\n" "$*" >> "$TEST_CALLS"\n')
+
+    def test_changed_runtime_blocks_before_helpers_or_writes(self):
+        self.marker()
+        (self.runtime/'files/lib/wine/x86_64-unix/win32u.so').write_bytes(b'changed')
+        self.assert_blocked_without_changes('failed verification')
 
     @staticmethod
     def executable(path, contents):

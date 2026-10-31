@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from runtime_fixture import make_runtime
 from unittest.mock import patch
 
 REPO=Path(__file__).resolve().parents[1]
@@ -48,6 +49,7 @@ class ManagerTests(unittest.TestCase):
 
     def test_profile_only_accepts_existing_prefix_and_proton(self):
         (self.app/'chosen/pfx').mkdir(parents=True);proton=self.root/'Proton custom';proton.mkdir();(proton/'proton').touch()
+        make_runtime(proton)
         with patch.object(manager,'fusion_running',return_value=False):self.action('profile',prefix='chosen',proton=str(proton))
         self.assertEqual((self.app/'prefix-dir').read_text(),'chosen\n');self.assertEqual((self.app/'proton-path').read_text(),str(proton)+'\n')
         with patch.object(manager,'fusion_running',return_value=False):
@@ -142,7 +144,8 @@ class ManagerTests(unittest.TestCase):
                 if phase!='complete':
                     self.assertEqual(state['fusion'],str(exe))
                     self.assertEqual(state['proton_path'],'/saved/Proton with spaces')
-                    self.assertEqual(state['proton'],'Proton with spaces')
+                    self.assertEqual(state['proton'],'Proton-Fusion')
+                    self.assertIsNotNone(state['runtime_error'])
 
     def test_invalid_markers_are_not_legacy_or_resumable(self):
         for content in ('not json','[]','{}',json.dumps(dict(phase='unknown',prefix='p',proton_path='/p',spacemouse=True)),
@@ -345,10 +348,11 @@ int main(int argc, char **argv) {
     def test_other_steam_library_proton_is_discovered(self):
         steam=self.root/'.local/share/Steam';(steam/'steamapps').mkdir(parents=True)
         library=self.root/'other Steam library';proton_dir=library/'steamapps/common/Proton Test';proton_dir.mkdir(parents=True);(proton_dir/'proton').touch()
+        make_runtime(proton_dir)
         (steam/'steamapps/libraryfolders.vdf').write_text('"libraryfolders" { "1" { "path" "'+str(library)+'" } }')
         with patch.dict(os.environ,HOME=str(self.root)):
             found,versions=manager.proton_versions()
-        self.assertEqual(found,str(steam));self.assertIn(dict(name='Proton Test',path=str(proton_dir)),versions)
+        self.assertEqual(found,str(steam));self.assertIn(dict(name='Proton-Fusion · test-build',path=str(proton_dir),build_id='test-build'),versions)
 
     def test_custom_proton_is_valid_without_a_steam_root(self):
         custom=self.root/'Custom Proton';custom.mkdir();(custom/'proton').touch()

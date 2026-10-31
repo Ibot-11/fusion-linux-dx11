@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+from runtime_fixture import make_runtime
 from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
@@ -159,6 +160,7 @@ class RuntimeDeploymentTests(unittest.TestCase):
         self.app.mkdir()
         self.environment = patch.dict(os.environ, HOME=str(self.root), XDG_DATA_HOME=str(self.root / 'data'), XDG_CONFIG_HOME=str(self.root / 'config'))
         self.environment.start()
+        make_runtime(setup_runtime.fusion_runtime.default_path())
         self.addCleanup(self.environment.stop)
         self.closed = patch.object(setup_runtime, 'fusion_running', return_value=False)
         self.closed.start()
@@ -169,29 +171,36 @@ class RuntimeDeploymentTests(unittest.TestCase):
             return setup_runtime.deploy(REPO, self.app, 'custom-prefix', desktop=False, service=False, **kwargs)
 
     def test_update_keeps_user_data_and_saves_replaced_files(self):
-        originals = {'prefix-dir': 'custom-prefix\n', 'proton-version': 'My Proton\n',
+        originals = {'prefix-dir': 'custom-prefix\n',
                      'gpu.conf': 'export DRI_PRIME=1\n', 'dxvk.conf': 'my DXVK settings\n'}
         for name, value in originals.items():
             (self.app / name).write_text(value)
         (self.app / 'launch.sh').write_text('previous launcher')
+        retired = ('panel-fix.exe', 'panel-fix.c', 'libVkLayer_fusion_present_sync.so',
+                   'libVkLayer_fusion_present_sync.c', 'VkLayer_fusion_present_sync.json')
+        for name in retired: (self.app/name).write_bytes(b'old integration')
         prefix = self.app / 'custom-prefix/pfx'
         prefix.mkdir(parents=True)
         (prefix / 'user.reg').write_text('registry untouched')
         (prefix / 'model.f3d').write_bytes(b'user document')
         backup = self.deploy(update=True)
+        for name in retired:
+            self.assertFalse((self.app/name).exists())
+            self.assertEqual((backup/name).read_bytes(), b'old integration')
         for name, value in originals.items():
             self.assertEqual((self.app / name).read_text(), value)
         self.assertEqual((prefix / 'user.reg').read_text(), 'registry untouched')
         self.assertEqual((prefix / 'model.f3d').read_bytes(), b'user document')
         self.assertEqual((backup / 'launch.sh').read_text(), 'previous launcher')
         self.assertNotEqual((self.app / 'launch.sh').read_text(), 'previous launcher')
-        self.assertEqual((self.app / 'dxvk.conf.dist').read_bytes(), (REPO / 'config/dxvk.conf').read_bytes())
+        runtime = setup_runtime.fusion_runtime.resolve(self.app)
+        self.assertEqual((self.app / 'dxvk.conf.dist').read_bytes(), (Path(runtime['path'])/'fusion/dxvk.conf').read_bytes())
         self.assertTrue((self.app / 'update.py').is_file())
 
     def test_new_install_gets_defaults_and_update_metadata(self):
         self.deploy()
         self.assertEqual((self.app / 'prefix-dir').read_text(), 'custom-prefix\n')
-        self.assertEqual((self.app / 'proton-version').read_text(), 'Proton - Experimental\n')
+        self.assertEqual((self.app / 'proton-version').read_text(), 'Proton-Fusion\n')
         self.assertEqual(json.loads((self.app / 'repo-state.json').read_text())['checkout'], str(REPO))
         self.assertNotIn('version', json.loads((self.app / 'repo-state.json').read_text()))
         self.assertTrue(os.access(self.app / 'update.py', os.X_OK))
@@ -348,7 +357,8 @@ class PortabilityTests(unittest.TestCase):
         self.app = self.root / 'Fusion app'
         self.app.mkdir()
         shutil.copy2(REPO / 'scripts/proton.py', self.app / 'proton.py')
-        self.env = dict(os.environ, HOME=str(self.root / 'home'), FUSION_APP_DIR=str(self.app))
+        shutil.copy2(REPO / 'scripts/fusion_runtime.py', self.app / 'fusion_runtime.py')
+        self.env = dict(os.environ, HOME=str(self.root / 'home'), XDG_DATA_HOME=str(self.root/'data'), FUSION_APP_DIR=str(self.app))
         Path(self.env['HOME']).mkdir()
 
     def executable(self, path, text):
@@ -365,7 +375,7 @@ class PortabilityTests(unittest.TestCase):
     def test_run_proton_uses_custom_path_without_steam(self):
         custom = self.root / 'Custom Proton'
         self.executable(custom / 'proton', '#!/bin/sh\nprintf "%s\\n" "$@"\n')
-        (self.app / 'proton-path').write_text(str(custom) + '\n')
+        setup_runtime.fusion_runtime.bind(self.app, make_runtime(custom))
         result = subprocess.run(['bash', str(REPO / 'scripts/run-proton.sh'), 'Fusion 360.exe'],
                                 env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -380,18 +390,19 @@ class PortabilityTests(unittest.TestCase):
                     '    out.write(json.dumps({"args": sys.argv[1:], "env": dict(os.environ)}) + "\\n")\n')
         self.executable(custom / 'proton', recorder)
         self.executable(custom / 'files/bin/wine', recorder)
+        setup_runtime.fusion_runtime.bind(self.app, make_runtime(custom))
         commands = self.root / 'commands'
         self.executable(commands / 'pgrep', '#!/bin/sh\nexit 0\n')
         (self.app / 'spacemouse-enabled').touch()
         (self.app / 'VkLayer_fusion_present_sync.json').touch()
+        (self.app / 'dxvk.conf').write_text('user DXVK configuration\n')
         base_env = dict(self.env, PATH=str(commands) + ':' + self.env['PATH'],
                         FUSION_PROTON_PATH=str(custom), FUSION_PREFIX_DIR='test-prefix',
                         CAPTURE=str(capture), VK_LAYER_PATH='/existing/layers',
                         VK_INSTANCE_LAYERS='EXISTING_LAYER')
         base_env.pop('WINEDEBUG', None)
         modes = [('normal', ['Fusion 360.exe', 'file.f3d'], ['run', 'Fusion 360.exe', 'file.f3d']),
-                 ('dpi', ['--set-dpi', '144'], None),
-                 ('panel', ['--panel-fix', 'extra'], [str(self.app / 'panel-fix.exe'), 'extra'])]
+                 ('dpi', ['--set-dpi', '144'], None)]
         cases = [('unset', None, None, '-all'), ('diagnostic', '+timestamp,+seh', None, '+timestamp,+seh'),
                  ('empty', '', None, ''), ('gpu.conf', '+seh', '+relay', '+relay')]
         for case, inherited, configured, expected in cases:
@@ -420,13 +431,9 @@ class PortabilityTests(unittest.TestCase):
                         actual = call['env']
                         self.assertEqual(actual['WINEDEBUG'], expected)
                         self.assertEqual(actual['STEAM_COMPAT_DATA_PATH'], str(self.app / 'test-prefix'))
-                        self.assertEqual(actual['PROTON_USE_WINED3D'], '0')
-                        self.assertEqual(actual['PROTON_USE_XALIA'], '0')
-                        self.assertEqual(actual['NO_AT_BRIDGE'], '1')
-                        self.assertEqual(actual['WINEDLLOVERRIDES'],
-                                         'bcp47langs=;icuuc,icuin,icudt,d3dcompiler_47=n,b;siappdll=n,b')
-                        self.assertEqual(actual['VK_LAYER_PATH'], str(self.app) + ':/existing/layers')
-                        self.assertEqual(actual['VK_INSTANCE_LAYERS'], 'VK_LAYER_FUSION_present_sync:EXISTING_LAYER')
+                        self.assertEqual(actual['WINEDLLOVERRIDES'], 'siappdll=n,b')
+                        self.assertEqual(actual['VK_LAYER_PATH'], '/existing/layers')
+                        self.assertEqual(actual['VK_INSTANCE_LAYERS'], 'EXISTING_LAYER')
                         self.assertEqual(actual['DXVK_CONFIG_FILE'], str(self.app / 'dxvk.conf'))
                         self.assertEqual(actual['DXVK_LOG_PATH'], str(self.app / 'logs'))
                         self.assertEqual(actual['DXVK_LOG_LEVEL'], 'info')
@@ -436,24 +443,23 @@ class PortabilityTests(unittest.TestCase):
                             for name in ('WINENTSYNC', 'WINEESYNC', 'WINEFSYNC'):
                                 self.assertEqual(actual[name], '1')
 
-    def test_switch_mode_resolves_profiles_and_removes_stale_custom_path(self):
+    def test_switch_mode_only_binds_fusion_and_rejects_legacy_runtime(self):
         commands = self.root / 'commands'
         self.executable(commands / 'pgrep', '#!/bin/sh\nexit 1\n')
         self.env['PATH'] = str(commands) + ':' + self.env['PATH']
-        common = self.root / 'home/.local/share/Steam/steamapps/common'
-        for name in ('Proton - Experimental', 'GE-Proton12-1'):
-            (common / name).mkdir(parents=True)
-            (common / name / 'proton').touch()
+        runtime = make_runtime(self.root/'data/fusion-linux-dx11/runtimes/Proton-Fusion/current')
         (self.app / 'proton-path').write_text(str(self.root / 'stale custom Proton') + '\n')
-        for mode, name in (('exp-dx11', 'Proton - Experimental'), ('ge-opengl', 'GE-Proton12-1')):
-            with self.subTest(mode=mode):
-                result = subprocess.run(['bash', str(REPO / 'scripts/switch-mode.sh'), mode],
-                                        env=self.env, capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual((self.app / 'proton-version').read_text(), name + '\n')
-                self.assertFalse((self.app / 'proton-path').exists())
+        result = subprocess.run(['bash', str(REPO/'scripts/switch-mode.sh'), 'exp-dx11'], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.app/'proton-version').read_text(), 'Proton-Fusion\n')
+        self.assertEqual((self.app/'proton-path').read_text().strip(), str(runtime))
+        saved = (self.app/'runtime-lock.json').read_bytes()
+        result = subprocess.run(['bash', str(REPO/'scripts/switch-mode.sh'), 'ge-opengl'], env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.app/'runtime-lock.json').read_bytes(), saved)
 
     def test_camera_preparation_failure_warns_and_still_launches(self):
+        setup_runtime.fusion_runtime.bind(self.app, make_runtime(self.root/'runtime'))
         fusion = self.app / 'compatdata-exp-dx11/pfx/drive_c/Fusion360.exe'
         fusion.parent.mkdir(parents=True)
         fusion.touch()
@@ -573,6 +579,8 @@ class FusionLanguageTests(unittest.TestCase):
 
     def test_launcher_uses_the_saved_manager_language(self):
         app = self.app
+        shutil.copy2(REPO/'scripts/fusion_runtime.py',app/'fusion_runtime.py')
+        setup_runtime.fusion_runtime.bind(app,make_runtime(self.root/'runtime'))
         shutil.copy2(REPO / 'scripts/launch.sh', app / 'launch.sh')
         shutil.copy2(REPO / 'scripts/fusion-language.py', app / 'fusion-language.py')
         (app / 'browser-listener.py').write_text('')
@@ -651,6 +659,8 @@ class FusionScaleTests(unittest.TestCase):
 
     def test_launcher_reapplies_the_saved_dpi_to_the_live_registry(self):
         app = self.app
+        shutil.copy2(REPO/'scripts/fusion_runtime.py',app/'fusion_runtime.py')
+        setup_runtime.fusion_runtime.bind(app,make_runtime(self.root/'runtime'))
         shutil.copy2(REPO / 'scripts/launch.sh', app / 'launch.sh')
         (app / 'browser-listener.py').write_text('')
         (app / 'fusion-dpi').write_text('144\n')

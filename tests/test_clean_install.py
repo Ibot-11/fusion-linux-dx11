@@ -8,6 +8,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from runtime_fixture import make_runtime
 from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
@@ -25,6 +26,7 @@ class CleanInstallTests(unittest.TestCase):
         self.proton = self.root / 'Custom Proton'
         self.proton.mkdir()
         (self.proton / 'proton').touch()
+        make_runtime(self.proton)
         self.installer = self.root / 'Autodesk.exe'
         self.installer.touch()
         self.events = []
@@ -312,7 +314,8 @@ class WineLockTests(unittest.TestCase):
                     patch.object(setup, 'copy_file'), patch.object(setup, 'atomic_write'), \
                     patch.object(setup.shutil, 'copytree'):
                 with self.assertRaisesRegex(ValueError, 'appeared during deployment'):
-                    setup.deploy(REPO, app, 'prefix', desktop=False, service=False)
+                    setup.deploy(REPO, app, 'prefix', desktop=False, service=False,
+                                 selected_proton=make_runtime(root/'runtime'))
             self.assertEqual(registry.read_text(), 'original')
 
     def test_active_server_lock_blocks_registry_edit(self):
@@ -404,6 +407,7 @@ class IntegrationSafetyTests(unittest.TestCase):
                 '  : > "$dir/Fusion360.exe"\n'
                 'fi\n')
             launcher.chmod(0o755)
+            make_runtime(proton)
             installer = root / 'Autodesk.exe'
             installer.touch()
             app = root / 'app'
@@ -424,7 +428,7 @@ class IntegrationSafetyTests(unittest.TestCase):
             self.assertIn('"d3dcompiler_47"="native,builtin"', registry)
             fusion = setup.find_fusion(app, 'prefix')
             self.assertIsNotNone(fusion)
-            self.assertTrue((fusion.parent / 'dxvk.conf').is_file())
+            self.assertFalse((fusion.parent / 'dxvk.conf').exists())
             self.assertTrue((root / 'data/applications/autodesk-fusion.desktop').is_file())
 
     def test_foreign_desktop_entry_is_preserved(self):

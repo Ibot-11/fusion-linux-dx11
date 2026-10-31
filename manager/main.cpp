@@ -935,7 +935,8 @@ class Manager : public QMainWindow {
         prefix->setObjectName("prefix");
         proton->setObjectName("proton");
         form->addRow(I18n::tr("Prefix"), prefix);
-        form->addRow("Proton", proton);
+        proton->setPlaceholderText("Proton-Fusion");
+        form->addRow("Proton-Fusion", proton);
         runtime->addLayout(form);
         auto *applyRow = new QHBoxLayout;
         applyRow->addStretch();
@@ -943,10 +944,7 @@ class Manager : public QMainWindow {
         runtime->addLayout(applyRow);
         layout->addWidget(
             panel(I18n::tr("Runtime"),
-                  I18n::tr("Select an existing Wine prefix and an installed Proton version. "
-                           "Their folders are preserved. Proton paths are available as item tooltips. A new "
-                           "installation may "
-                           "use a new prefix name; applying a runtime selection requires an existing prefix."),
+                  I18n::tr("Fusion always uses a verified Proton-Fusion build. The installer prepares it automatically when needed. Select an existing prefix to apply a runtime build."),
                   runtime));
         mutationControls << prefix << proton;
 

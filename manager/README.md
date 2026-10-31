@@ -1,6 +1,6 @@
 # Fusion Manager
 
-Native Qt 6 application for installing and launching Fusion, selecting Wine prefixes and Proton runtimes, updating this integration and configuring SpaceMouse. The interface is available in English and German.
+Native Qt 6 application for installing and launching Fusion, selecting Wine prefixes and verified Proton-Fusion builds, updating this integration and configuring SpaceMouse. The interface is available in English and German.
 
 ## Start
 
@@ -33,7 +33,7 @@ If a new installation was interrupted, close Fusion before choosing whether to r
 
 **Check** explicitly fetches the configured remote. **Update** accepts only a fast-forward and refuses local changes or divergent history. The footer explains when no update was started or when the checkout is already current. The updater never resets, stashes or switches branches.
 
-Replaced runtime files are backed up under `backups/updates`. Prefixes, documents and Proton, GPU, DXVK and SpaceMouse preferences are preserved. Fusion itself continues to use Autodesk's updater.
+Replaced runtime files are backed up under `backups/updates`. Prefixes, documents and custom GPU, DXVK and SpaceMouse preferences are preserved. The integration pins a verified Proton-Fusion build and retires the legacy sync layer and panel daemon. Fusion itself continues to use Autodesk's updater.
 
 Close Fusion before installation, integration updates, SDK changes or runtime changes. Camera speed can be applied while Fusion is running; if live control is unavailable, it takes effect at the next launch. Only one Manager operation runs at a time, and the window cannot be closed during an active operation.
 
@@ -60,7 +60,6 @@ The selected installation contains `logs/manager-launch.log` and the other runti
 Requirements: Python 3, a C++17 compiler, Make, pkg-config, Qt 6 Widgets development tools and Vulkan headers.
 
 ```bash
-make -C layer
 make -C manager
 make -C manager check
 bash spacemouse/build.sh

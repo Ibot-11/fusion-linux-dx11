@@ -56,6 +56,11 @@ PY
   fi
 fi
 
+if ! fusion_runtime_check="$(python3 "$APP_DIR/fusion_runtime.py" resolve "$APP_DIR" 2>&1)"; then
+  launch_error "$fusion_runtime_check"
+  exit 1
+fi
+
 if [[ -f "$APP_DIR/prefix-dir" ]]; then PREFIX_DIR="$(cat "$APP_DIR/prefix-dir")"; fi
 production="$APP_DIR/$PREFIX_DIR/pfx/drive_c"
 
@@ -150,14 +155,7 @@ else
   FIX_PID=''
 fi
 
-if [[ -f "$APP_DIR/panel-fix.exe" ]]; then
-  "$APP_DIR/run-proton.sh" --panel-fix >> "$APP_DIR/logs/panel-fix.log" 2>&1 &
-  PANEL_PID=$!
-else
-  PANEL_PID=''
-fi
-
-trap 'kill "$LISTENER_PID" ${FIX_PID:+"$FIX_PID"} ${PANEL_PID:+"$PANEL_PID"} 2>/dev/null || true' EXIT
+trap 'kill "$LISTENER_PID" ${FIX_PID:+"$FIX_PID"} 2>/dev/null || true' EXIT
 
 cd "$(dirname "$FUSION")"
 ARGS=()
