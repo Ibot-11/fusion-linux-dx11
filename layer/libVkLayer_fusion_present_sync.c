@@ -2,9 +2,17 @@
  * libVkLayer_fusion_present_sync
  *
  * Vulkan Layer for Autodesk Fusion 360 under Wine/DXVK.
- * Synchronizes presentation on the main 3D canvas (vkQueueWaitIdle) to ensure
- * child window Blt copies in Wine do not display stale (N-1) frames during snapping/sketching,
+ * Synchronizes presentation on the main 3D canvas to ensure child window Blt
+ * copies in Wine do not display stale (N-1) frames during snapping/sketching,
  * while safely ignoring small floating HUDs/FIFO swapchains to prevent deadlocks.
+ *
+ * Wine copies the canvas (a WS_CHILD window) to its parent right after
+ * vkQueuePresentKHR returns, but Mesa's X11 WSI hands the frame to Xwayland
+ * from a background thread. vkQueueWaitIdle only covers the GPU, so the copy
+ * could win the race and show the previous frame. DXVK 3.x attaches a present
+ * fence (VK_KHR_swapchain_maintenance1) to every present; the layer waits on it,
+ * which returns once the WSI has handed the frame over. Without a present fence
+ * it falls back to vkQueueWaitIdle alone.
  *
  * Compilation:
  *   gcc -shared -fPIC -O2 -o libVkLayer_fusion_present_sync.so libVkLayer_fusion_present_sync.c
@@ -26,9 +34,11 @@ typedef void* VkPhysicalDevice;
 typedef void (*PFN_vkVoidFunction)(void);
 
 #define VK_SUCCESS 0
+#define VK_TIMEOUT 2
 #define VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO 47
 #define VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO 48
 #define VK_PRESENT_MODE_IMMEDIATE_KHR 0
+#define VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_KHR 1000275001
 
 typedef enum VkLayerFunction_ {
     VK_LAYER_LINK_INFO = 0,
@@ -74,6 +84,20 @@ typedef struct VkPresentInfoKHR_ {
     int *pResults;
 } VkPresentInfoKHR;
 
+typedef struct VkBaseInStructure_ {
+    int sType;
+    const struct VkBaseInStructure_ *pNext;
+} VkBaseInStructure;
+
+typedef uint64_t VkFence;
+
+typedef struct VkSwapchainPresentFenceInfoKHR_ {
+    int sType;
+    const void *pNext;
+    uint32_t swapchainCount;
+    const VkFence *pFences;
+} VkSwapchainPresentFenceInfoKHR;
+
 typedef PFN_vkVoidFunction (*PFN_vkGetInstanceProcAddr)(VkInstance instance, const char *pName);
 typedef PFN_vkVoidFunction (*PFN_vkGetDeviceProcAddr)(VkDevice device, const char *pName);
 typedef PFN_vkVoidFunction (*PFN_GetPhysicalDeviceProcAddr)(VkInstance instance, const char *pName);
@@ -84,6 +108,7 @@ typedef VkResult (*PFN_vkQueuePresentKHR)(VkQueue queue, const VkPresentInfoKHR 
 typedef VkResult (*PFN_vkQueueWaitIdle)(VkQueue queue);
 typedef VkResult (*PFN_vkCreateSwapchainKHR)(VkDevice device, const VkSwapchainCreateInfoKHR *pCreateInfo, const void *pAllocator, void **pSwapchain);
 typedef void (*PFN_vkDestroySwapchainKHR)(VkDevice device, void *swapchain, const void *pAllocator);
+typedef VkResult (*PFN_vkWaitForFences)(VkDevice device, uint32_t fenceCount, const VkFence *pFences, uint32_t waitAll, uint64_t timeout);
 
 typedef struct VkLayerInstanceLink_ {
     struct VkLayerInstanceLink_ *pNext;
@@ -133,14 +158,34 @@ static PFN_vkQueuePresentKHR g_real_vkQueuePresentKHR = NULL;
 static PFN_vkQueueWaitIdle g_real_vkQueueWaitIdle = NULL;
 static PFN_vkCreateSwapchainKHR g_real_vkCreateSwapchainKHR = NULL;
 static PFN_vkDestroySwapchainKHR g_real_vkDestroySwapchainKHR = NULL;
+static PFN_vkWaitForFences g_real_vkWaitForFences = NULL;
 
 #define MAX_CANVAS_SWAPCHAINS 16
 static void *g_canvas_swapchains[MAX_CANVAS_SWAPCHAINS] = {0};
+static VkDevice g_canvas_devices[MAX_CANVAS_SWAPCHAINS] = {0};
+static volatile int g_canvas_lock = 0;
+
+// After this many consecutive timeouts (fence never signalled) only every
+// FENCE_WAIT_PROBE_EVERY-th present waits again.
+#define FENCE_WAIT_BACKOFF_AFTER 3
+#define FENCE_WAIT_PROBE_EVERY 32
 
 static unsigned long long g_present_count = 0;
 static int g_debug = 0;
 static int g_sync_enabled = 1;
+static int g_wait_fence = 1;
+static uint64_t g_wait_timeout_ns = 25000000ull;
+static unsigned g_wait_timeouts = 0;
 static int g_env_inited = 0;
+
+static void canvas_lock(void) {
+    while (__sync_lock_test_and_set(&g_canvas_lock, 1)) {
+    }
+}
+
+static void canvas_unlock(void) {
+    __sync_lock_release(&g_canvas_lock);
+}
 
 static void init_env(void) {
     if (g_env_inited) return;
@@ -152,42 +197,101 @@ static void init_env(void) {
     const char *dis = getenv("FUSION_SYNC_DISABLE");
     if (dis && atoi(dis) > 0) g_sync_enabled = 0;
 
+    const char *fence = getenv("FUSION_SYNC_WAIT_FENCE");
+    if (fence && atoi(fence) == 0) g_wait_fence = 0;
+
+    const char *wait_ms = getenv("FUSION_SYNC_WAIT_MS");
+    if (wait_ms && atoi(wait_ms) > 0) g_wait_timeout_ns = (uint64_t)atoi(wait_ms) * 1000000ull;
+
     if (g_debug) {
-        fprintf(stderr, "[fusion-sync-layer] Initialized in pid %d: sync_enabled=%d\n", getpid(), g_sync_enabled);
+        fprintf(stderr, "[fusion-sync-layer] Initialized in pid %d: sync_enabled=%d wait_fence=%d timeout=%llums\n",
+                getpid(), g_sync_enabled, g_wait_fence, (unsigned long long)(g_wait_timeout_ns / 1000000ull));
     }
 }
 
-static void track_canvas_swapchain(void *sc) {
+static void track_canvas_swapchain(void *sc, VkDevice device) {
+    int slot = 0;
+    canvas_lock();
     for (int i = 0; i < MAX_CANVAS_SWAPCHAINS; i++) {
         if (g_canvas_swapchains[i] == NULL || g_canvas_swapchains[i] == sc) {
-            g_canvas_swapchains[i] = sc;
-            return;
+            slot = i;
+            break;
         }
     }
-    g_canvas_swapchains[0] = sc;
+    g_canvas_devices[slot] = device;
+    g_canvas_swapchains[slot] = sc;
+    canvas_unlock();
 }
 
 static void untrack_canvas_swapchain(void *sc) {
+    canvas_lock();
     for (int i = 0; i < MAX_CANVAS_SWAPCHAINS; i++) {
         if (g_canvas_swapchains[i] == sc) {
             g_canvas_swapchains[i] = NULL;
         }
     }
+    canvas_unlock();
 }
 
-static int should_sync_swapchain(const VkPresentInfoKHR *pPresentInfo) {
+struct canvas_present {
+    VkDevice device;
+    VkFence fence;  // 0: this present carries no present fence
+};
+
+static int find_canvas_present(const VkPresentInfoKHR *pPresentInfo, struct canvas_present *out) {
+    memset(out, 0, sizeof(*out));
     if (!pPresentInfo || !pPresentInfo->pSwapchains || pPresentInfo->swapchainCount == 0) {
         return 0;
     }
-    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; i++) {
+
+    const VkSwapchainPresentFenceInfoKHR *fences = NULL;
+    for (const VkBaseInStructure *b = (const VkBaseInStructure *)pPresentInfo->pNext; b; b = b->pNext) {
+        if (b->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_KHR) {
+            fences = (const VkSwapchainPresentFenceInfoKHR *)b;
+            break;
+        }
+    }
+
+    int found = 0;
+    canvas_lock();
+    for (uint32_t i = 0; i < pPresentInfo->swapchainCount && !found; i++) {
         void *sc = (void *)pPresentInfo->pSwapchains[i];
         for (int j = 0; j < MAX_CANVAS_SWAPCHAINS; j++) {
             if (g_canvas_swapchains[j] && g_canvas_swapchains[j] == sc) {
-                return 1;
+                out->device = g_canvas_devices[j];
+                if (fences && fences->pFences && i < fences->swapchainCount) {
+                    out->fence = fences->pFences[i];
+                }
+                found = 1;
+                break;
             }
         }
     }
-    return 0;
+    canvas_unlock();
+    return found;
+}
+
+// Block until the WSI has handed the frame we just presented to the display
+// server, so Wine's follow-up child window copy cannot pick up the previous one.
+// (vkWaitForPresent2KHR would also work, but the display server only completes
+// copy presents on a ~17 ms timer, which would cap Fusion at ~58 fps.)
+// Bounded: a fence that is never signalled must not stall Fusion.
+// Returns the vkWaitForFences result, or -1 if no wait was done.
+static VkResult wait_for_present_fence(const struct canvas_present *cp) {
+    if (!g_wait_fence || !g_real_vkWaitForFences || !cp->fence) {
+        return -1;
+    }
+    if (g_wait_timeouts >= FENCE_WAIT_BACKOFF_AFTER && g_present_count % FENCE_WAIT_PROBE_EVERY != 0) {
+        return -1;
+    }
+
+    VkResult res = g_real_vkWaitForFences(cp->device, 1, &cp->fence, 1, g_wait_timeout_ns);
+    if (res == VK_SUCCESS) {
+        g_wait_timeouts = 0;
+    } else if (res == VK_TIMEOUT) {
+        g_wait_timeouts++;
+    }
+    return res;
 }
 
 static VkResult fusion_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCreateInfo, const void *pAllocator, void **pSwapchain) {
@@ -203,7 +307,7 @@ static VkResult fusion_CreateSwapchainKHR(VkDevice device, const VkSwapchainCrea
         // ONLY synchronize the main 3D canvas (large viewport > 500x500 in IMMEDIATE mode)
         // NEVER synchronize tiny floating tool windows, dimension HUDs (150x45), or FIFO swapchains
         if (w >= 500 && h >= 500 && mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-            track_canvas_swapchain(*pSwapchain);
+            track_canvas_swapchain(*pSwapchain, device);
             if (g_debug) {
                 fprintf(stderr, "[fusion-sync-layer] Tracking 3D canvas swapchain %p (%ux%u, mode=%d)\n",
                         *pSwapchain, w, h, mode);
@@ -233,11 +337,14 @@ static VkResult fusion_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *
     }
 
     // Only synchronize if this present is for the main 3D canvas!
-    if (g_sync_enabled && g_real_vkQueueWaitIdle && queue && should_sync_swapchain(pPresentInfo)) {
+    struct canvas_present canvas;
+    if (g_sync_enabled && g_real_vkQueueWaitIdle && queue && find_canvas_present(pPresentInfo, &canvas)) {
         g_real_vkQueueWaitIdle(queue);
         g_present_count++;
-        if (g_debug && (g_present_count <= 5 || g_present_count % 300 == 0)) {
-            fprintf(stderr, "[fusion-sync-layer] Canvas frame #%llu synchronized (res=%d)\n", g_present_count, res);
+        VkResult wait_res = res >= VK_SUCCESS ? wait_for_present_fence(&canvas) : -1;
+        if (g_debug && (g_present_count <= 5 || g_present_count % 300 == 0 || wait_res == VK_TIMEOUT)) {
+            fprintf(stderr, "[fusion-sync-layer] Canvas frame #%llu synchronized (res=%d, fence_wait=%d)\n",
+                    g_present_count, res, wait_res);
         }
     }
 
@@ -281,9 +388,11 @@ static VkResult fusion_CreateDevice(VkPhysicalDevice physicalDevice, const void 
         g_real_vkQueueWaitIdle = (PFN_vkQueueWaitIdle)next_gdpa(*pDevice, "vkQueueWaitIdle");
         g_real_vkCreateSwapchainKHR = (PFN_vkCreateSwapchainKHR)next_gdpa(*pDevice, "vkCreateSwapchainKHR");
         g_real_vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)next_gdpa(*pDevice, "vkDestroySwapchainKHR");
+        g_real_vkWaitForFences = (PFN_vkWaitForFences)next_gdpa(*pDevice, "vkWaitForFences");
         if (g_debug) {
-            fprintf(stderr, "[fusion-sync-layer] Device created! QueuePresent=%p WaitIdle=%p CreateSwapchain=%p\n",
-                    g_real_vkQueuePresentKHR, g_real_vkQueueWaitIdle, g_real_vkCreateSwapchainKHR);
+            fprintf(stderr, "[fusion-sync-layer] Device created! QueuePresent=%p WaitIdle=%p CreateSwapchain=%p WaitForFences=%p\n",
+                    g_real_vkQueuePresentKHR, g_real_vkQueueWaitIdle, g_real_vkCreateSwapchainKHR,
+                    g_real_vkWaitForFences);
         }
     }
     return res;
