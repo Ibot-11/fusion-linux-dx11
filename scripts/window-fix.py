@@ -1,16 +1,8 @@
 #!/usr/bin/env python3
 from Xlib import X, display
-from Xlib.protocol import event
-
-d = display.Display()
-root = d.screen().root
-
-root.change_attributes(event_mask=X.SubstructureNotifyMask)
-
-print("[Fusion Linux] Event-driven watcher started")
 
 
-def is_problematic(win):
+def is_problematic(win, connection):
     try:
         attrs = win.get_attributes()
         if not attrs.override_redirect:
@@ -20,8 +12,8 @@ def is_problematic(win):
         if name != "Fusion360":
             return False
 
-        type_atom = d.intern_atom('_NET_WM_WINDOW_TYPE')
-        dialog_atom = d.intern_atom('_NET_WM_WINDOW_TYPE_DIALOG')
+        type_atom = connection.intern_atom('_NET_WM_WINDOW_TYPE')
+        dialog_atom = connection.intern_atom('_NET_WM_WINDOW_TYPE_DIALOG')
 
         wtype = win.get_full_property(type_atom, X.AnyPropertyType)
         if wtype is None or dialog_atom not in wtype.value:
@@ -39,6 +31,16 @@ def is_problematic(win):
 
         try:
             parent_win = transient
+            # Real dropdowns are transient for a tool panel. Comparing their
+            # area with that small panel can mistake them for a large phantom
+            # dialog. Only a direct transient of the managed main window is
+            # eligible for this workaround.
+            if parent_win.get_attributes().override_redirect or parent_win.get_wm_transient_for() is not None:
+                return False
+            normal_atom = connection.intern_atom('_NET_WM_WINDOW_TYPE_NORMAL')
+            parent_type = parent_win.get_full_property(type_atom, X.AnyPropertyType)
+            if parent_type is None or normal_atom not in parent_type.value:
+                return False
             parent_geom = parent_win.get_geometry()
             popup_geom = win.get_geometry()
 
@@ -69,12 +71,21 @@ def is_problematic(win):
         return False
 
 
-while True:
-    ev = d.next_event()
+def main():
+    connection = display.Display()
+    root = connection.screen().root
+    root.change_attributes(event_mask=X.SubstructureNotifyMask)
+    print("[Fusion Linux] Event-driven watcher started", flush=True)
+    try:
+        while True:
+            ev = connection.next_event()
+            if ev.type == X.MapNotify and is_problematic(ev.window, connection):
+                print(f"[Fusion Linux] Problematic dialog detected (event-driven): {ev.window.id:#x}", flush=True)
+                ev.window.unmap()
+                connection.sync()
+    finally:
+        connection.close()
 
-    if ev.type == X.MapNotify:
-        win = ev.window
-        if is_problematic(win):
-            print(f"[Fusion Linux] Problematic dialog detected (event-driven): {win.id:#x}")
-            win.unmap()
-            d.sync()
+
+if __name__ == '__main__':
+    main()
